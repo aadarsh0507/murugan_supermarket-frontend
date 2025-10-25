@@ -1,0 +1,296 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 220 25% 97%;
+    --foreground: 220 15% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 15%;
+
+    --primary: 239 70% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 20% 92%;
+    --secondary-foreground: 220 15% 20%;
+
+    --muted: 220 20% 95%;
+    --muted-foreground: 220 10% 45%;
+
+    --accent: 25 95% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --success: 142 76% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 20% 88%;
+    --input: 220 20% 88%;
+    --ring: 239 70% 55%;
+
+    --radius: 0.75rem;
+
+    --gradient-primary: linear-gradient(135deg, hsl(239 70% 55%), hsl(260 70% 60%));
+    --gradient-accent: linear-gradient(135deg, hsl(25 95% 55%), hsl(35 95% 60%));
+    --gradient-success: linear-gradient(135deg, hsl(142 76% 45%), hsl(152 76% 50%));
+    --gradient-mesh: radial-gradient(at 40% 20%, hsl(239 70% 95%) 0px, transparent 50%),
+                     radial-gradient(at 80% 0%, hsl(260 70% 95%) 0px, transparent 50%),
+                     radial-gradient(at 0% 50%, hsl(25 95% 95%) 0px, transparent 50%);
+    
+    --shadow-sm: 0 2px 8px -2px hsl(220 15% 15% / 0.08);
+    --shadow-md: 0 4px 16px -4px hsl(220 15% 15% / 0.12);
+    --shadow-lg: 0 12px 32px -8px hsl(220 15% 15% / 0.16);
+    --shadow-glow: 0 0 32px hsl(239 70% 55% / 0.2);
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 15% 15%;
+    --sidebar-primary: 239 70% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 95%;
+    --sidebar-accent-foreground: 220 15% 20%;
+    --sidebar-border: 220 20% 88%;
+    --sidebar-ring: 239 70% 55%;
+  }
+
+  .dark {
+    --background: 220 20% 10%;
+    --foreground: 220 15% 95%;
+
+    --card: 220 18% 14%;
+    --card-foreground: 220 15% 95%;
+
+    --popover: 220 18% 14%;
+    --popover-foreground: 220 15% 95%;
+
+    --primary: 239 70% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 18% 20%;
+    --secondary-foreground: 220 15% 95%;
+
+    --muted: 220 18% 18%;
+    --muted-foreground: 220 10% 60%;
+
+    --accent: 25 95% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --success: 142 76% 50%;
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 18% 22%;
+    --input: 220 18% 22%;
+    --ring: 239 70% 60%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(239 70% 60%), hsl(260 70% 65%));
+    --gradient-accent: linear-gradient(135deg, hsl(25 95% 60%), hsl(35 95% 65%));
+    --gradient-success: linear-gradient(135deg, hsl(142 76% 50%), hsl(152 76% 55%));
+    --gradient-mesh: radial-gradient(at 40% 20%, hsl(239 70% 15%) 0px, transparent 50%),
+                     radial-gradient(at 80% 0%, hsl(260 70% 15%) 0px, transparent 50%),
+                     radial-gradient(at 0% 50%, hsl(25 95% 15%) 0px, transparent 50%);
+
+    --shadow-sm: 0 2px 8px -2px hsl(0 0% 0% / 0.3);
+    --shadow-md: 0 4px 16px -4px hsl(0 0% 0% / 0.4);
+    --shadow-lg: 0 12px 32px -8px hsl(0 0% 0% / 0.5);
+    --shadow-glow: 0 0 32px hsl(239 70% 60% / 0.3);
+
+    --sidebar-background: 220 18% 14%;
+    --sidebar-foreground: 220 15% 95%;
+    --sidebar-primary: 239 70% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 18% 20%;
+    --sidebar-accent-foreground: 220 15% 95%;
+    --sidebar-border: 220 18% 22%;
+    --sidebar-ring: 239 70% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Mobile Responsive Improvements */
+@layer utilities {
+  /* Ensure touch targets are at least 44px */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Mobile-friendly scrolling */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+  
+  /* Prevent horizontal scroll on mobile */
+  .mobile-container {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Mobile-friendly text sizing */
+  .mobile-text-xs { font-size: 0.75rem; line-height: 1rem; }
+  .mobile-text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+  .mobile-text-base { font-size: 1rem; line-height: 1.5rem; }
+  .mobile-text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+  
+  /* Mobile-friendly spacing */
+  .mobile-p-2 { padding: 0.5rem; }
+  .mobile-p-3 { padding: 0.75rem; }
+  .mobile-p-4 { padding: 1rem; }
+  .mobile-gap-2 { gap: 0.5rem; }
+  .mobile-gap-3 { gap: 0.75rem; }
+  .mobile-gap-4 { gap: 1rem; }
+  
+  /* Mobile-friendly button sizing */
+  .mobile-btn-sm {
+    height: 2rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+  }
+  
+  .mobile-btn-md {
+    height: 2.5rem;
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+  }
+  
+  /* Mobile-friendly modal */
+  .mobile-modal {
+    margin: 1rem;
+    max-height: calc(100vh - 2rem);
+    width: calc(100vw - 2rem);
+  }
+  
+  /* Mobile-friendly card */
+  .mobile-card {
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+  }
+  
+  /* Mobile-friendly grid */
+  .mobile-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+  
+  @media (min-width: 640px) {
+    .mobile-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+    }
+  }
+  
+  @media (min-width: 1024px) {
+    .mobile-grid {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+    }
+  }
+  
+  @media (min-width: 1280px) {
+    .mobile-grid {
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+    }
+  }
+}
+
+/* Mobile-specific improvements */
+@media (max-width: 768px) {
+  /* Ensure proper touch targets */
+  button, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Improve text readability */
+  body {
+    font-size: 16px; /* Prevent zoom on iOS */
+    line-height: 1.5;
+  }
+  
+  /* Better spacing for mobile */
+  .container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Mobile-friendly form elements */
+  input, textarea, select {
+    font-size: 16px; /* Prevent zoom on iOS */
+    padding: 0.75rem;
+  }
+  
+  /* Mobile-friendly tables */
+  table {
+    font-size: 0.875rem;
+  }
+  
+  /* Mobile-friendly modals */
+  .modal-content {
+    margin: 1rem;
+    max-height: calc(100vh - 2rem);
+    width: calc(100vw - 2rem);
+  }
+  
+  /* Mobile-friendly navigation */
+  .nav-item {
+    padding: 0.75rem 1rem;
+  }
+  
+  /* Mobile-friendly cards */
+  .card {
+    margin-bottom: 1rem;
+  }
+  
+  /* Mobile-friendly buttons */
+  .btn-group {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .btn-group .btn {
+    width: 100%;
+  }
+}
+
+/* Tablet-specific improvements */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+  
+  .mobile-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Desktop-specific improvements */
+@media (min-width: 1025px) {
+  .container {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
