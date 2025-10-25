@@ -11,12 +11,12 @@ export default defineConfig(({ mode }) => ({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'https://murugan-supermarket-backend.onrender.com/',
         changeOrigin: true,
         secure: false,
       },
       '/uploads': {
-        target: 'http://localhost:5000',
+        target: 'https://murugan-supermarket-backend.onrender.com/',
         changeOrigin: true,
         secure: false,
       }
