@@ -1,7 +1,7 @@
 // API configuration
 const API_BASE_URL = import.meta.env.DEV 
   ? '/api'  // Use proxy in development
-  : (import.meta.env.VITE_API_URL || 'https://murugan-supermarket-backend.onrender.com//api');
+  : (import.meta.env.VITE_API_URL || 'https://murugan-supermarket-backend.onrender.com/api');
 
 // Helper function to get auth token from localStorage
 const getAuthToken = () => {
