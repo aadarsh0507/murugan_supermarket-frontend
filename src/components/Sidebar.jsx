@@ -6,6 +6,9 @@ import {
   ChevronRight,
   Archive,
   BarChart3,
+  Truck,
+  Building2,
+  ShoppingCart,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,6 +17,9 @@ import { useState } from "react";
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: Archive, label: "Items", path: "/items" },
+  { icon: Truck, label: "Suppliers", path: "/suppliers" },
+  { icon: Building2, label: "Stores", path: "/stores" },
+  { icon: ShoppingCart, label: "Purchase Orders", path: "/purchase-orders" },
   { icon: Users, label: "Users", path: "/users" },
   { icon: BarChart3, label: "Reports", path: "/reports" },
 ];

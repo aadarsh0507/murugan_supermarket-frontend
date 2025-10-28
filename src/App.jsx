@@ -15,6 +15,9 @@ import Items from "./pages/Items";
 import Categories from "./pages/Categories";
 import Users from "./pages/Users";
 import Reports from "./pages/Reports";
+import Suppliers from "./pages/Suppliers";
+import Stores from "./pages/Stores";
+import PurchaseOrders from "./pages/PurchaseOrders";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -62,7 +65,7 @@ const App = () => (
             <Route 
               path="/items" 
               element={
-                <ProtectedRoute requiredDepartments={['inventory', 'sales', 'management']}>
+                <ProtectedRoute requiredDepartments={["inventory", "sales", "management"]}>
                   <Layout><Items /></Layout>
                 </ProtectedRoute>
               } 
@@ -70,7 +73,7 @@ const App = () => (
             <Route 
               path="/categories" 
               element={
-                <ProtectedRoute requiredRoles={['admin', 'manager']}>
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <Layout><Categories /></Layout>
                 </ProtectedRoute>
               } 
@@ -78,7 +81,7 @@ const App = () => (
             <Route 
               path="/users" 
               element={
-                <ProtectedRoute requiredRoles={['admin', 'manager']}>
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <Layout><Users /></Layout>
                 </ProtectedRoute>
               } 
@@ -88,6 +91,30 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Layout><Reports /></Layout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/suppliers" 
+              element={
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
+                  <Layout><Suppliers /></Layout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/stores" 
+              element={
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
+                  <Layout><Stores /></Layout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/purchase-orders" 
+              element={
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
+                  <Layout><PurchaseOrders /></Layout>
                 </ProtectedRoute>
               } 
             />

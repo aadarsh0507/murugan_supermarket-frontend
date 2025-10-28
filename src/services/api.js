@@ -1,7 +1,7 @@
 // API configuration
 const API_BASE_URL = import.meta.env.DEV 
   ? '/api'  // Use proxy in development
-  : (import.meta.env.VITE_API_URL || 'https://murugan-supermarket-backend.onrender.com/api');
+  : (import.meta.env.VITE_API_URL || 'http://localhost:5000/api');
 
 // Helper function to get auth token from localStorage
 const getAuthToken = () => {
@@ -366,6 +366,142 @@ export const billsAPI = {
   // Get items with no movement
   getNoMovementItems: async () => {
     return await apiRequest('/bills/no-movement');
+  },
+};
+
+// Suppliers API
+export const suppliersAPI = {
+  // Get all suppliers
+  getSuppliers: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/suppliers?${queryString}` : '/suppliers';
+    return await apiRequest(endpoint);
+  },
+
+  // Get single supplier
+  getSupplier: async (supplierId) => {
+    return await apiRequest(`/suppliers/${supplierId}`);
+  },
+
+  // Create supplier
+  createSupplier: async (supplierData) => {
+    return await apiRequest('/suppliers', {
+      method: 'POST',
+      body: JSON.stringify(supplierData),
+    });
+  },
+
+  // Update supplier
+  updateSupplier: async (supplierId, supplierData) => {
+    return await apiRequest(`/suppliers/${supplierId}`, {
+      method: 'PUT',
+      body: JSON.stringify(supplierData),
+    });
+  },
+
+  // Delete supplier
+  deleteSupplier: async (supplierId) => {
+    return await apiRequest(`/suppliers/${supplierId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Toggle supplier status
+  toggleSupplierStatus: async (supplierId) => {
+    return await apiRequest(`/suppliers/${supplierId}/toggle-status`, {
+      method: 'PATCH',
+    });
+  },
+
+  // Add store to supplier
+  addStoreToSupplier: async (supplierId, storeId) => {
+    return await apiRequest(`/suppliers/${supplierId}/stores`, {
+      method: 'POST',
+      body: JSON.stringify({ storeId }),
+    });
+  },
+
+  // Remove store from supplier
+  removeStoreFromSupplier: async (supplierId, storeId) => {
+    return await apiRequest(`/suppliers/${supplierId}/stores/${storeId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Get all stores
+  getStores: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/suppliers/stores?${queryString}` : '/suppliers/stores';
+    return await apiRequest(endpoint);
+  },
+
+  // Create store
+  createStore: async (storeData) => {
+    return await apiRequest('/suppliers/stores', {
+      method: 'POST',
+      body: JSON.stringify(storeData),
+    });
+  },
+
+  // Update store
+  updateStore: async (storeId, storeData) => {
+    return await apiRequest(`/suppliers/stores/${storeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(storeData),
+    });
+  },
+
+  // Delete store
+  deleteStore: async (storeId) => {
+    return await apiRequest(`/suppliers/stores/${storeId}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+// Purchase Orders API
+export const purchaseOrdersAPI = {
+  // Get all purchase orders
+  getPurchaseOrders: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/purchase-orders?${queryString}` : '/purchase-orders';
+    return await apiRequest(endpoint);
+  },
+
+  // Get single purchase order
+  getPurchaseOrder: async (poId) => {
+    return await apiRequest(`/purchase-orders/${poId}`);
+  },
+
+  // Create purchase order
+  createPurchaseOrder: async (poData) => {
+    return await apiRequest('/purchase-orders', {
+      method: 'POST',
+      body: JSON.stringify(poData),
+    });
+  },
+
+  // Update purchase order
+  updatePurchaseOrder: async (poId, poData) => {
+    return await apiRequest(`/purchase-orders/${poId}`, {
+      method: 'PUT',
+      body: JSON.stringify(poData),
+    });
+  },
+
+  // Delete purchase order
+  deletePurchaseOrder: async (poId) => {
+    return await apiRequest(`/purchase-orders/${poId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Receive purchase order (update stock)
+  receivePurchaseOrder: async (poId, receivedItems = []) => {
+    return await apiRequest(`/purchase-orders/${poId}/receive`, {
+      method: 'PATCH',
+      body: JSON.stringify({ receivedItems }),
+    });
   },
 };
 

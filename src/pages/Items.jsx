@@ -671,7 +671,7 @@ export default function Items() {
       <div style="font-family: monospace; max-width: 300px; margin: 0 auto; padding: 20px; font-size: 12px; line-height: 1.2;">
         <!-- Store Header -->
         <div style="text-align: center; margin-bottom: 15px;">
-          <h1 style="font-size: 16px; font-weight: bold; text-transform: uppercase; margin: 0;">JAYA SUPER STORE</h1>
+          <h1 style="font-size: 16px; font-weight: bold; text-transform: uppercase; margin: 0;">MURUGAN SUPER MARKET</h1>
           <p style="margin: 2px 0; font-size: 10px;">No 25, Loop Road, Acharapakkam - 603301</p>
           <p style="margin: 2px 0; font-size: 10px;">Ph. 044-27522026</p>
           <p style="margin: 2px 0; font-size: 10px;">GST No 33AWOPD5029J1ZS</p>
