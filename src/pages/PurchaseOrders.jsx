@@ -235,11 +235,51 @@ const PurchaseOrders = () => {
     const totalItems = items.length;
     const totalQty = items.reduce((sum, item) => sum + (item.poQty || 0), 0);
     const price = items.reduce((sum, item) => sum + ((item.poQty || 0) * (item.price || 0)), 0);
-    const discount = items.reduce((sum, item) => sum + (item.dis || 0), 0);
-    const totalTax = items.reduce((sum, item) => {
-      const taxAmount = ((item.price || 0) * (item.taxPercent || 0)) / 100;
-      return sum + taxAmount * (item.poQty || 0);
+    
+    // Calculate total discount across all items based on discount type
+    const discount = items.reduce((sum, item) => {
+      const poQty = item.poQty || 0;
+      const price = item.price || 0;
+      const discountType = item.discountType || '%';
+      const disPercent = item.disPercent || 0;
+      const dis = item.dis || 0;
+      const taxPercent = item.taxPercent || 0;
+      
+      const subtotalBeforeDiscount = poQty * price;
+      
+      let totalDiscountAmount = 0;
+      if (discountType === '%') {
+        totalDiscountAmount = (subtotalBeforeDiscount * disPercent) / 100;
+      } else {
+        totalDiscountAmount = dis; // Fixed amount discount
+      }
+      
+      return sum + totalDiscountAmount;
     }, 0);
+    
+    const totalTax = items.reduce((sum, item) => {
+      const poQty = item.poQty || 0;
+      const price = item.price || 0;
+      const discountType = item.discountType || '%';
+      const disPercent = item.disPercent || 0;
+      const dis = item.dis || 0;
+      const taxPercent = item.taxPercent || 0;
+      
+      const subtotalBeforeDiscount = poQty * price;
+      
+      let totalDiscountAmount = 0;
+      if (discountType === '%') {
+        totalDiscountAmount = (subtotalBeforeDiscount * disPercent) / 100;
+      } else {
+        totalDiscountAmount = dis;
+      }
+      
+      const subtotalAfterDiscount = subtotalBeforeDiscount - totalDiscountAmount;
+      const taxAmount = (subtotalAfterDiscount * taxPercent) / 100;
+      
+      return sum + taxAmount;
+    }, 0);
+    
     const totalAmount = items.reduce((sum, item) => sum + (item.total || 0), 0);
     
     setFormData(prev => ({
