@@ -60,6 +60,11 @@ const PurchaseOrders = () => {
     dispatchMode: "",
     items: [{ 
       particulars: "", 
+      sku: "",
+      unit: "",
+      itemId: "",
+      categoryName: "",
+      subcategoryName: "",
       poQty: 0, 
       discountType: '%',
       disPercent: 0, 
@@ -142,6 +147,11 @@ const PurchaseOrders = () => {
       ...formData,
       items: [...formData.items, { 
         particulars: "", 
+        sku: "",
+        unit: "",
+        itemId: "",
+        categoryName: "",
+        subcategoryName: "",
         poQty: 0, 
         discountType: '%',
         disPercent: 0, 
@@ -222,8 +232,13 @@ const PurchaseOrders = () => {
     items[index] = {
       ...items[index],
       particulars: suggestion.name || suggestion.itemName || '',
+      sku: suggestion.sku || '',
+      unit: suggestion.unit || '',
       price: suggestion.cost || suggestion.price || 0,
       mrp: suggestion.price || 0,
+      itemId: suggestion._id || '',
+      categoryName: suggestion.category || '',
+      subcategoryName: suggestion.subcategory || '',
       // Attempt to set a default tax if available via tags
     };
     setFormData({ ...formData, items });
@@ -298,24 +313,48 @@ const PurchaseOrders = () => {
     setSaving(true);
     
     try {
+      // Filter out empty items (items with no particulars or quantity 0)
+      const validItems = formData.items.filter(item => 
+        item.particulars && item.particulars.trim() !== "" && item.poQty > 0
+      );
+
+      if (validItems.length === 0) {
+        toast({ 
+          title: "Error", 
+          description: "Please add at least one item with a name and quantity", 
+          variant: "destructive" 
+        });
+        setSaving(false);
+        return;
+      }
+
       const poData = {
         supplier: formData.supplier,
         store: formData.store,
         orderDate: formData.quotationDate,
-        expectedDeliveryDate: formData.dueDate,
-        items: formData.items.map(item => ({
-          itemName: item.particulars,
-          sku: "",
-          quantity: item.poQty,
-          unit: "",
-          costPrice: item.price,
-          total: item.total,
-          notes: ""
-        })),
-        tax: formData.totalTax,
-        discount: formData.discount,
+        // Only include expectedDeliveryDate if it has a value
+        ...(formData.dueDate && formData.dueDate.trim() !== "" && { expectedDeliveryDate: formData.dueDate }),
+        items: validItems.map(item => {
+          const itemData = {
+            itemName: item.particulars,
+            quantity: item.poQty,
+            costPrice: item.price,
+            total: item.total
+          };
+          
+          // Only include optional fields if they have values
+          if (item.sku && item.sku.trim() !== "") itemData.sku = item.sku;
+          if (item.unit && item.unit.trim() !== "") itemData.unit = item.unit;
+          if (item.categoryName && item.categoryName.trim() !== "") itemData.categoryName = item.categoryName;
+          if (item.subcategoryName && item.subcategoryName.trim() !== "") itemData.subcategoryName = item.subcategoryName;
+          
+          return itemData;
+        }),
+        tax: formData.totalTax || 0,
+        discount: formData.discount || 0,
         shipping: parseFloat(formData.freight || 0),
-        notes: formData.remarks
+        // Only include notes if it has a value
+        ...(formData.remarks && formData.remarks.trim() !== "" && { notes: formData.remarks })
       };
 
       if (editingPO) {
@@ -329,7 +368,25 @@ const PurchaseOrders = () => {
       // Reset form
       handleNewPO();
     } catch (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      console.error('Error saving purchase order:', error);
+      
+      // Handle validation errors specifically
+      let errorMessage = error.message || "Failed to save purchase order";
+      if (error.response && error.response.data && error.response.data.errors) {
+        const validationErrors = error.response.data.errors;
+        console.error("Validation errors:", validationErrors);
+        const errorMessages = validationErrors.map(err => {
+          const field = err.path || err.param || 'field';
+          return `${field}: ${err.msg}`;
+        });
+        errorMessage = `Validation failed:\n${errorMessages.join('\n')}`;
+      }
+      
+      toast({ 
+        title: "Error", 
+        description: errorMessage, 
+        variant: "destructive" 
+      });
     } finally {
       setSaving(false);
     }
@@ -362,6 +419,11 @@ const PurchaseOrders = () => {
       dispatchMode: "",
       items: [{ 
         particulars: "", 
+        sku: "",
+        unit: "",
+        itemId: "",
+        categoryName: "",
+        subcategoryName: "",
         poQty: 0, 
         discountType: '%',
         disPercent: 0, 

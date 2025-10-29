@@ -1118,16 +1118,17 @@ export default function Items() {
         )}
       </motion.div>
 
-      {/* Add/Edit Item Modal */}
-      <Modal
-        open={isModalOpen}
-        onOpenChange={setIsModalOpen}
-        title={editingItem ? "Edit Item" : "Add New Item"}
-        description="Enter the item details below"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
+       {/* Add/Edit Item Modal */}
+       <Modal
+         open={isModalOpen}
+         onOpenChange={setIsModalOpen}
+         title={editingItem ? "Edit Item" : "Add New Item"}
+         description="Enter the item details below"
+       >
+         <form onSubmit={handleSubmit} className="flex flex-col h-[70vh]">
+           <div className="flex-1 overflow-y-auto space-y-4 -mx-1 px-1">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
               <Label htmlFor="name">Item Name</Label>
               <Input
                 id="name"
@@ -1380,7 +1381,10 @@ export default function Items() {
             </div>
           </div>
 
-          <div className="flex gap-3 pt-4">
+          </div>
+          
+          {/* Fixed buttons at bottom */}
+          <div className="flex gap-3 pt-4 mt-auto border-t bg-background">
             <Button type="submit" className="flex-1 bg-gradient-primary" disabled={saving}>
               {saving ? "Saving..." : (editingItem ? "Update Item" : "Add Item")}
             </Button>
@@ -1388,12 +1392,14 @@ export default function Items() {
               type="button"
               variant="outline"
               onClick={() => setIsModalOpen(false)}
+              disabled={saving}
+              className="flex-1"
             >
               Cancel
             </Button>
           </div>
         </form>
-      </Modal>
+        </Modal>
 
       {/* Cart Modal - Mobile Responsive */}
       <Modal
