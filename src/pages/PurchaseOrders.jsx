@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, Search, X, Save, ShoppingCart, Check, Scale, Tag, Percent, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,30 +34,17 @@ const PurchaseOrders = () => {
   const [allItems, setAllItems] = useState([]); // Flattened list from Categories -> Subcategories -> Items
   const [itemSuggestions, setItemSuggestions] = useState({}); // rowIndex -> items list
   const [openSuggestIndex, setOpenSuggestIndex] = useState(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const inputRefs = useRef({});
 
   const [formData, setFormData] = useState({
     supplier: "",
     supplierName: "",
+    supplierDetails: null, // Store full supplier details
     store: "",
     quotationDate: new Date().toISOString().split('T')[0],
     validDate: "",
     dueDate: "",
-    referenceDate: "",
-    quotationNo: "",
-    referenceNo: "",
-    chequeNo: "",
-    advAmount: "",
-    remarks: "",
-    servCharge: "",
-    taxPercent: "",
-    netServCharge: "",
-    addOthers: "",
-    lessOthers: "",
-    freight: "",
-    netFreight: "",
-    globalTax: "",
-    paymentTerms: "",
-    dispatchMode: "",
     items: [{ 
       particulars: "", 
       sku: "",
@@ -65,6 +52,9 @@ const PurchaseOrders = () => {
       itemId: "",
       categoryName: "",
       subcategoryName: "",
+      batchNumber: "",
+      hsnNumber: "",
+      expiryDate: "",
       poQty: 0, 
       discountType: '%',
       disPercent: 0, 
@@ -85,6 +75,18 @@ const PurchaseOrders = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (openSuggestIndex !== null && !event.target.closest('.suggestions-dropdown')) {
+        setOpenSuggestIndex(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openSuggestIndex]);
 
   const loadData = async () => {
     setLoading(true);
@@ -126,6 +128,7 @@ const PurchaseOrders = () => {
               unit: item.unit,
               category: cat.name,
               subcategory: sub.name,
+              hsnCode: item.hsnCode,
             });
           });
         });
@@ -152,6 +155,9 @@ const PurchaseOrders = () => {
         itemId: "",
         categoryName: "",
         subcategoryName: "",
+        batchNumber: "",
+        hsnNumber: "",
+        expiryDate: "",
         poQty: 0, 
         discountType: '%',
         disPercent: 0, 
@@ -239,6 +245,7 @@ const PurchaseOrders = () => {
       itemId: suggestion._id || '',
       categoryName: suggestion.category || '',
       subcategoryName: suggestion.subcategory || '',
+      hsnNumber: suggestion.hsnCode || suggestion.hsnNumber || '',
       // Attempt to set a default tax if available via tags
     };
     setFormData({ ...formData, items });
@@ -347,6 +354,9 @@ const PurchaseOrders = () => {
           if (item.unit && item.unit.trim() !== "") itemData.unit = item.unit;
           if (item.categoryName && item.categoryName.trim() !== "") itemData.categoryName = item.categoryName;
           if (item.subcategoryName && item.subcategoryName.trim() !== "") itemData.subcategoryName = item.subcategoryName;
+          if (item.batchNumber && item.batchNumber.trim() !== "") itemData.batchNumber = item.batchNumber;
+          if (item.hsnNumber && item.hsnNumber.trim() !== "") itemData.hsnNumber = item.hsnNumber;
+          if (item.expiryDate && item.expiryDate.trim() !== "") itemData.expiryDate = item.expiryDate;
           
           return itemData;
         }),
@@ -397,6 +407,7 @@ const PurchaseOrders = () => {
     setFormData({
       supplier: "",
       supplierName: "",
+      supplierDetails: null,
       store: "",
       quotationDate: new Date().toISOString().split('T')[0],
       validDate: "",
@@ -424,6 +435,9 @@ const PurchaseOrders = () => {
         itemId: "",
         categoryName: "",
         subcategoryName: "",
+        batchNumber: "",
+        hsnNumber: "",
+        expiryDate: "",
         poQty: 0, 
         discountType: '%',
         disPercent: 0, 
@@ -460,11 +474,8 @@ const PurchaseOrders = () => {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-2xl text-red-600 flex items-center gap-2">
-              PURCHASE ORDER
-              <Badge className="bg-green-500">
-                <Check className="h-3 w-3 mr-1" />
-                Against Price List
-              </Badge>
+              PURCHASE
+              
             </CardTitle>
             <div className="flex gap-2">
               <Button type="submit" form="poForm" variant="default" size="sm" disabled={saving}>
@@ -488,9 +499,16 @@ const PurchaseOrders = () => {
             <div className="grid grid-cols-3 gap-4 mb-4">
               <div>
                 <Label>Supplier Name</Label>
-                <Select value={formData.supplier} onValueChange={(v) => {
+                <Select value={formData.supplier} onValueChange={async (v) => {
                   const sup = suppliers.find(s => s._id === v);
-                  setFormData({...formData, supplier: v, supplierName: sup?.companyName || ""});
+                  try {
+                    // Fetch full supplier details
+                    const response = await suppliersAPI.getSupplier(v);
+                    setFormData({...formData, supplier: v, supplierName: sup?.companyName || "", supplierDetails: response.data});
+                  } catch (error) {
+                    console.error('Error fetching supplier details:', error);
+                    setFormData({...formData, supplier: v, supplierName: sup?.companyName || ""});
+                  }
                 }}>
                   <SelectTrigger>
                     <SelectValue />
@@ -527,6 +545,51 @@ const PurchaseOrders = () => {
           </CardContent>
         </Card>
 
+        {/* Supplier Details Section */}
+        {formData.supplierDetails && (
+          <Card>
+            <CardContent className="pt-6">
+              <h3 className="font-semibold mb-4 text-blue-600">Supplier Details</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <Label className="text-xs text-gray-500">Contact Person</Label>
+                  <p className="font-medium">
+                    {formData.supplierDetails.contactPerson?.firstName || ''} {formData.supplierDetails.contactPerson?.lastName || ''}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">Email</Label>
+                  <p className="font-medium">{formData.supplierDetails.email || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">Phone</Label>
+                  <p className="font-medium">{formData.supplierDetails.phone?.primary || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">Address</Label>
+                  <p className="font-medium">
+                    {formData.supplierDetails.address?.street || ''}, {formData.supplierDetails.address?.city || ''}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">GST Number</Label>
+                  <p className="font-medium">{formData.supplierDetails.gstNumber || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">PAN Number</Label>
+                  <p className="font-medium">{formData.supplierDetails.panNumber || '-'}</p>
+                </div>
+                {formData.supplierDetails.paymentTerms && (
+                  <div>
+                    <Label className="text-xs text-gray-500">Payment Terms</Label>
+                    <p className="font-medium">{formData.supplierDetails.paymentTerms}</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Summary Section */}
         <Card>
           <CardContent className="pt-6">
@@ -541,27 +604,27 @@ const PurchaseOrders = () => {
               </div>
               <div className="flex items-center gap-2">
                 <Tag className="h-5 w-5 text-purple-500" />
-                <span className="text-sm">Price: <strong>₹{formData.price.toFixed(2)}</strong></span>
+                <span className="text-sm">Price: <strong>₹{Math.round(formData.price)}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <Percent className="h-5 w-5 text-orange-500" />
-                <span className="text-sm">Discount: <strong>₹{formData.discount.toFixed(2)}</strong></span>
+                <span className="text-sm">Discount: <strong>₹{Math.round(formData.discount)}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <Receipt className="h-5 w-5 text-red-500" />
-                <span className="text-sm">Total Tax: <strong>₹{formData.totalTax.toFixed(2)}</strong></span>
+                <span className="text-sm">Total Tax: <strong>₹{Math.round(formData.totalTax)}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <Receipt className="h-5 w-5 text-blue-600" />
-                <span className="text-sm">Total Amount: <strong>₹{formData.totalAmount.toFixed(2)}</strong></span>
+                <span className="text-sm">Total Amount: <strong>₹{Math.round(formData.totalAmount)}</strong></span>
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Items Table */}
-        <Card>
-          <CardContent className="pt-6">
+        <Card className="overflow-visible">
+          <CardContent className="pt-6 overflow-visible">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-semibold">Line Items</h3>
               <Button type="button" onClick={addItem} variant="destructive" size="sm">
@@ -569,56 +632,114 @@ const PurchaseOrders = () => {
                 ADD ITEM
               </Button>
             </div>
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-visible">
               <Table>
                 <TableHeader className="bg-blue-600 text-white">
                   <TableRow>
                     <TableHead className="text-white"><input type="checkbox" /></TableHead>
                     <TableHead className="text-white">PARTICULARS</TableHead>
                     <TableHead className="text-white">Quantity</TableHead>
+                    <TableHead className="text-white">Batch No.</TableHead>
+                    <TableHead className="text-white">HSN</TableHead>
+                    <TableHead className="text-white">Expiry Date</TableHead>
                     <TableHead className="text-white">Discount Type</TableHead>
                     <TableHead className="text-white">DIS</TableHead>
                     <TableHead className="text-white">TAX%</TableHead>
                     <TableHead className="text-white">PRICE</TableHead>
                     <TableHead className="text-white">TOTAL</TableHead>
                     <TableHead className="text-white">MRP</TableHead>
-                    <TableHead className="text-white">ADD</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {formData.items.map((item, index) => (
                     <TableRow key={index}>
                       <TableCell><input type="checkbox" /></TableCell>
-                      <TableCell className="relative">
-                        <Input
-                          placeholder="Search for a Particulars"
-                          value={item.particulars}
-                          onChange={(e) => searchItems(index, e.target.value)}
-                          onFocus={() => setOpenSuggestIndex(index)}
-                          className="w-60"
-                        />
-                        {openSuggestIndex === index && (itemSuggestions[index]?.length || 0) > 0 && (
-                          <div className="absolute z-10 mt-1 w-96 max-h-64 overflow-auto rounded-md border bg-popover p-1 shadow">
-                            {itemSuggestions[index].map((s) => (
-                              <button
-                                key={s._id}
-                                type="button"
-                                className="flex w-full items-center justify-between rounded px-2 py-1 text-left hover:bg-accent"
-                                onClick={() => chooseSuggestion(index, s)}
-                              >
-                                <span className="text-sm">{s.name}</span>
-                                <span className="text-xs text-muted-foreground">{s.sku}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                      <TableCell className="relative overflow-visible">
+                        <div className="suggestions-dropdown relative w-60">
+                          <Input
+                            ref={(el) => (inputRefs.current[index] = el)}
+                            placeholder="Search for a Particulars"
+                            value={item.particulars}
+                            onChange={(e) => {
+                              const inputEl = inputRefs.current[index];
+                              if (inputEl) {
+                                const rect = inputEl.getBoundingClientRect();
+                                setDropdownPosition({
+                                  top: rect.bottom + window.scrollY + 4,
+                                  left: rect.left + window.scrollX
+                                });
+                              }
+                              searchItems(index, e.target.value);
+                            }}
+                            onFocus={() => {
+                              const inputEl = inputRefs.current[index];
+                              if (inputEl) {
+                                const rect = inputEl.getBoundingClientRect();
+                                setDropdownPosition({
+                                  top: rect.bottom + window.scrollY + 4,
+                                  left: rect.left + window.scrollX
+                                });
+                              }
+                              setOpenSuggestIndex(index);
+                            }}
+                            className="w-full"
+                          />
+                          {openSuggestIndex === index && (itemSuggestions[index]?.length || 0) > 0 && (
+                            <div className="suggestions-dropdown fixed z-50 w-96 max-h-64 overflow-auto rounded-md border bg-white p-1 shadow-lg"
+                                 style={{
+                                   top: `${dropdownPosition.top}px`,
+                                   left: `${dropdownPosition.left}px`,
+                                   position: 'fixed',
+                                   zIndex: 9999
+                                 }}>
+                              {itemSuggestions[index].map((s) => (
+                                <button
+                                  key={s._id}
+                                  type="button"
+                                  className="flex w-full items-center justify-between rounded px-2 py-1 text-left hover:bg-accent cursor-pointer"
+                                  onClick={() => chooseSuggestion(index, s)}
+                                >
+                                  <span className="text-sm">{s.name}</span>
+                                  <span className="text-xs text-muted-foreground">{s.sku}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Input
                           type="number"
-                          value={item.poQty}
+                          value={item.poQty || ''}
                           onChange={(e) => updateItem(index, 'poQty', parseFloat(e.target.value) || 0)}
                           className="w-20"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="text"
+                          value={item.batchNumber || ''}
+                          onChange={(e) => updateItem(index, 'batchNumber', e.target.value)}
+                          placeholder="Batch No."
+                          className="w-24"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="text"
+                          value={item.hsnNumber || ''}
+                          onChange={(e) => updateItem(index, 'hsnNumber', e.target.value)}
+                          placeholder="HSN Code"
+                          className="w-24"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="date"
+                          value={item.expiryDate || ''}
+                          onChange={(e) => updateItem(index, 'expiryDate', e.target.value)}
+                          placeholder="Expiry Date"
+                          className="w-32"
                         />
                       </TableCell>
                       <TableCell>
@@ -638,7 +759,7 @@ const PurchaseOrders = () => {
                       <TableCell>
                         <Input
                           type="number"
-                          value={item.discountType === '%' ? item.disPercent : item.dis}
+                          value={item.discountType === '%' ? (item.disPercent || '') : (item.dis || '')}
                           onChange={(e) => {
                             const value = parseFloat(e.target.value) || 0;
                             if (item.discountType === '%') {
@@ -668,24 +789,19 @@ const PurchaseOrders = () => {
                       <TableCell>
                         <Input
                           type="number"
-                          value={item.price}
+                          value={item.price || ''}
                           onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
                           className="w-24"
                         />
                       </TableCell>
-                      <TableCell className="font-medium">₹{item.total.toFixed(2)}</TableCell>
+                      <TableCell className="font-medium">₹{Math.round(item.total)}</TableCell>
                       <TableCell>
                         <Input
                           type="number"
-                          value={item.mrp}
+                          value={item.mrp || ''}
                           onChange={(e) => updateItem(index, 'mrp', parseFloat(e.target.value) || 0)}
                           className="w-24"
                         />
-                      </TableCell>
-                      <TableCell>
-                        <Button type="button" variant="destructive" size="sm" onClick={() => removeItem(index)}>
-                          <Plus className="h-4 w-4" />
-                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
