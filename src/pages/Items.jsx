@@ -420,16 +420,16 @@ export default function Items() {
       return;
     }
 
-    // Ensure price is greater than or equal to cost price when cost is provided
+    // Ensure price is less than or equal to cost price when cost is provided
     if (
       formData.cost !== "" &&
       !isNaN(parseFloat(formData.cost)) &&
       !isNaN(parseFloat(formData.price)) &&
-      parseFloat(formData.price) < parseFloat(formData.cost)
+      parseFloat(formData.price) > parseFloat(formData.cost)
     ) {
       toast({
         title: "Validation Error",
-        description: "Price must be greater than or equal to cost price",
+        description: "Price must be less than or equal to cost price",
         variant: "destructive",
       });
       return;
@@ -1251,10 +1251,42 @@ export default function Items() {
             </div>
             
             <div className="space-y-1 md:space-y-2">
-              <div className="flex justify-between text-xs md:text-sm">
-                <span className="font-medium">Price:</span>
-                <span>₹{item.price}</span>
-              </div>
+              {/* Price and Cost Display with Offer Indicator */}
+              {item.cost !== undefined && item.cost !== null && item.cost !== "" ? (
+                <div className="space-y-1 p-2 rounded-lg bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs md:text-sm font-medium text-gray-600">Cost Price:</span>
+                    <span className="text-xs md:text-sm font-semibold text-gray-700 line-through">₹{parseFloat(item.cost).toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs md:text-sm font-semibold text-gray-800">Sale Price:</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm md:text-base font-bold ${
+                        parseFloat(item.price) < parseFloat(item.cost) 
+                          ? 'text-green-600' 
+                          : 'text-gray-800'
+                      }`}>
+                        ₹{parseFloat(item.price).toFixed(2)}
+                      </span>
+                      {parseFloat(item.price) < parseFloat(item.cost) && (
+                        <Badge className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 animate-pulse">
+                          OFFER
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  {parseFloat(item.price) < parseFloat(item.cost) && (
+                    <div className="text-xs text-green-700 font-semibold mt-1">
+                      Save ₹{((parseFloat(item.cost) - parseFloat(item.price)).toFixed(2))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex justify-between text-xs md:text-sm">
+                  <span className="font-medium">Price:</span>
+                  <span className="text-sm md:text-base font-semibold">₹{parseFloat(item.price || 0).toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-xs md:text-sm">
                 <span className="font-medium">Stock:</span>
                 <span className={`${
@@ -1630,14 +1662,24 @@ export default function Items() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="price">Price (₹)</Label>
+              <Label htmlFor="price">Sale Price (₹) *</Label>
               <Input
                 id="price"
                 type="number"
                 value={formData.price || ""}
                 onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) })}
                 required
+                placeholder="Must be ≤ cost price"
               />
+              {formData.cost && parseFloat(formData.cost) > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {formData.price && parseFloat(formData.price) > parseFloat(formData.cost) ? (
+                    <span className="text-red-600">Price must be ≤ Cost (₹{parseFloat(formData.cost).toFixed(2)})</span>
+                  ) : (
+                    <span className="text-green-600">✓ Price is within limit (Cost: ₹{parseFloat(formData.cost).toFixed(2)})</span>
+                  )}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="stock">Stock</Label>
@@ -1701,13 +1743,13 @@ export default function Items() {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="cost">Cost (₹)</Label>
+              <Label htmlFor="cost">Cost Price (₹)</Label>
               <Input
                 id="cost"
                 type="number"
                 value={formData.cost || ""}
                 onChange={(e) => setFormData({ ...formData, cost: parseFloat(e.target.value) || "" })}
-                placeholder="Cost price"
+                placeholder="Cost price (Sale price must be ≤ this)"
               />
             </div>
             <div className="space-y-2">

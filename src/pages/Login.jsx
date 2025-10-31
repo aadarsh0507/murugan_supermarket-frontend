@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Lock, Mail, Loader2, Facebook, Twitter, Linkedin } from "lucide-react";
+import { Lock, Mail, Loader2, Facebook, Twitter, Linkedin, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ export default function Login() {
   const { login, isLoading, error, clearError } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -46,6 +47,11 @@ export default function Login() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleMailClick = () => {
+    // Open Gmail compose with the email address
+    window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=jprsupermarket@gmail.com`, "_blank");
   };
 
   return (
@@ -116,11 +122,24 @@ export default function Login() {
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                       id="password"
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-9 bg-blue-50 border-gray-300 focus:border-yellow-500 focus:ring-yellow-500"
+                      className="pl-9 pr-9 bg-blue-50 border-gray-300 focus:border-yellow-500 focus:ring-yellow-500"
                     />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-gray-400" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-gray-400" />
+                      )}
+                    </Button>
                   </div>
                 </div>
 
@@ -160,12 +179,17 @@ export default function Login() {
           info@pushdiggy.gmail.com
         </div>
         <div className="flex items-center space-x-4">
-          <Facebook className="h-5 w-5 text-white" />
-          <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+          <Facebook className="h-5 w-5 text-white cursor-pointer" />
+          <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center cursor-pointer">
             <span className="text-red-600 text-xs font-bold">g+</span>
           </div>
-          <Linkedin className="h-5 w-5 text-white" />
-          <Twitter className="h-5 w-5 text-white" />
+          <Mail 
+            className="h-5 w-5 text-white cursor-pointer hover:text-yellow-300 transition-colors" 
+            onClick={handleMailClick}
+            title="Send email to jprsupermarket@gmail.com"
+          />
+          <Linkedin className="h-5 w-5 text-white cursor-pointer" />
+          <Twitter className="h-5 w-5 text-white cursor-pointer" />
         </div>
       </div>
     </div>

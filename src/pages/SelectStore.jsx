@@ -20,15 +20,40 @@ export default function SelectStore() {
   const [currentSelectedStore, setCurrentSelectedStore] = useState(null);
 
   useEffect(() => {
-    loadStores();
-    loadCurrentSelectedStore();
-  }, []);
+    if (user) {
+      loadStores();
+      loadCurrentSelectedStore();
+    }
+  }, [user]);
 
   const loadStores = async () => {
     setLoading(true);
     try {
-      const response = await suppliersAPI.getStores({ isActive: true });
-      setStores(response.data || []);
+      // If user has stores assigned, filter to show only those stores
+      if (user && user.stores && user.stores.length > 0) {
+        // Get all active stores first
+        const response = await suppliersAPI.getStores({ isActive: true });
+        const allStores = response.data || [];
+        
+        // Filter to only show stores the user has access to
+        const userStoreIds = user.stores.map(store => 
+          typeof store === 'object' ? store._id : store
+        );
+        const accessibleStores = allStores.filter(store => 
+          userStoreIds.includes(store._id)
+        );
+        
+        setStores(accessibleStores);
+      } else {
+        // If user has no stores assigned or is admin, show all stores
+        // For non-admin users without stores, show empty list with message
+        if (user && user.role !== 'admin') {
+          setStores([]);
+        } else {
+          const response = await suppliersAPI.getStores({ isActive: true });
+          setStores(response.data || []);
+        }
+      }
     } catch (error) {
       console.error("Error loading stores:", error);
       toast({
