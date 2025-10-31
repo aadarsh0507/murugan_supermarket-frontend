@@ -1090,6 +1090,7 @@ const Suppliers = () => {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>S.No.</TableHead>
                 <TableHead>Company Name</TableHead>
                 <TableHead>Contact Person</TableHead>
                 <TableHead>Email</TableHead>
@@ -1102,13 +1103,14 @@ const Suppliers = () => {
             <TableBody>
               {filteredSuppliers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8">
+                  <TableCell colSpan={8} className="text-center py-8">
                     <p className="text-muted-foreground">No suppliers found</p>
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredSuppliers.map((supplier) => (
+                filteredSuppliers.map((supplier, index) => (
                   <TableRow key={supplier._id}>
+                    <TableCell className="text-muted-foreground">{index + 1}</TableCell>
                     <TableCell className="font-medium">{supplier.companyName}</TableCell>
                     <TableCell>
                       {supplier.contactPerson?.firstName} {supplier.contactPerson?.lastName}

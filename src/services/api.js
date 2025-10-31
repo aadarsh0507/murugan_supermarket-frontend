@@ -548,6 +548,14 @@ export const barcodesAPI = {
   },
 };
 
+// Dashboard API
+export const dashboardAPI = {
+  // Get dashboard statistics for selected store
+  getDashboardStats: async () => {
+    return await apiRequest('/dashboard/stats');
+  },
+};
+
 // Health check
 export const healthCheck = async () => {
   return await apiRequest('/health');
