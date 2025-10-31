@@ -2,8 +2,8 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
-const ProtectedRoute = ({ children, requiredRoles = [], requiredDepartments = [] }) => {
-  const { isAuthenticated, isLoading, user } = useAuth();
+const ProtectedRoute = ({ children, requiredRoles = [], requiredDepartments = [], skipStoreCheck = false }) => {
+  const { isAuthenticated, isLoading, user, selectedStore } = useAuth();
   const location = useLocation();
 
   // Show loading spinner while checking authentication
@@ -21,6 +21,11 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredDepartments = []
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
     return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  // Check if store is selected - redirect to select-store if not (except for select-store page itself)
+  if (!skipStoreCheck && !selectedStore && location.pathname !== '/select-store') {
+    return <Navigate to="/select-store" state={{ from: location }} replace />;
   }
 
   // Check role requirements

@@ -47,6 +47,8 @@ export default function Reports() {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState("all");
+  const [stores, setStores] = useState([]);
+  const [selectedStoreId, setSelectedStoreId] = useState("all");
   const [poReportData, setPoReportData] = useState(null);
   const [poReportType, setPoReportType] = useState("monthly"); // "monthly", "daily", "supplierwise"
   const [activeTab, setActiveTab] = useState("sales"); // "sales" or "purchase"
@@ -64,15 +66,49 @@ export default function Reports() {
   const isManager = hasRole('manager');
 
   useEffect(() => {
+    // Restore persisted filters
+    try {
+      const saved = JSON.parse(localStorage.getItem('reports_filters') || '{}');
+      if (saved.activeTab) setActiveTab(saved.activeTab);
+      if (saved.reportType) setReportType(saved.reportType);
+      if (saved.poReportType) setPoReportType(saved.poReportType);
+      if (saved.poViewMode) setPoViewMode(saved.poViewMode);
+      if (saved.dateFrom) setDateFrom(saved.dateFrom);
+      if (saved.dateTo) setDateTo(saved.dateTo);
+      if (saved.selectedUserId) setSelectedUserId(saved.selectedUserId);
+      if (saved.selectedSupplierId) setSelectedSupplierId(saved.selectedSupplierId);
+      if (saved.selectedStoreId) setSelectedStoreId(saved.selectedStoreId);
+      if (saved.selectedCategoryId) setSelectedCategoryId(saved.selectedCategoryId);
+      if (saved.stockSearch) setStockSearch(saved.stockSearch);
+    } catch {}
+
     loadUsers();
     loadSuppliers();
+    loadStores();
     loadCategories();
     loadReportData();
-    // Load PO data immediately if we're on the purchase tab
     if (activeTab === "purchase") {
       loadPOReportData();
     }
   }, []);
+
+  // Persist filters whenever they change
+  useEffect(() => {
+    const toSave = {
+      activeTab,
+      reportType,
+      poReportType,
+      poViewMode,
+      dateFrom,
+      dateTo,
+      selectedUserId,
+      selectedSupplierId,
+      selectedStoreId,
+      selectedCategoryId,
+      stockSearch,
+    };
+    localStorage.setItem('reports_filters', JSON.stringify(toSave));
+  }, [activeTab, reportType, poReportType, poViewMode, dateFrom, dateTo, selectedUserId, selectedSupplierId, selectedStoreId, selectedCategoryId, stockSearch]);
 
   useEffect(() => {
     loadReportData();
@@ -80,13 +116,13 @@ export default function Reports() {
 
   useEffect(() => {
     if (activeTab === "purchase") {
-      if (poReportType === "stock") {
+      if (poReportType === "stock" || poReportType === "storewise") {
         loadStockWithBatches();
       } else {
         loadPOReportData();
       }
     }
-  }, [dateFrom, dateTo, selectedSupplierId, stockSearch, selectedCategoryId, poReportType]);
+  }, [dateFrom, dateTo, selectedSupplierId, selectedStoreId, stockSearch, selectedCategoryId, poReportType]);
 
   const loadUsers = async () => {
     try {
@@ -106,6 +142,16 @@ export default function Reports() {
       setSuppliers(suppliersData);
     } catch (error) {
       console.error("Error loading suppliers:", error);
+    }
+  };
+
+  const loadStores = async () => {
+    try {
+      const response = await suppliersAPI.getStores();
+      const storesData = response.data || [];
+      setStores(storesData);
+    } catch (error) {
+      console.error("Error loading stores:", error);
     }
   };
 
@@ -131,6 +177,9 @@ export default function Reports() {
       if (dateTo) params.endDate = dateTo;
       if (selectedSupplierId && selectedSupplierId !== "all") {
         params.supplierId = selectedSupplierId;
+      }
+      if (selectedStoreId && selectedStoreId !== "all") {
+        params.storeId = selectedStoreId;
       }
 
       const response = await purchaseOrdersAPI.getPurchaseOrders(params);
@@ -162,6 +211,10 @@ export default function Reports() {
       }
       if (selectedCategoryId && selectedCategoryId !== "all") {
         params.categoryId = selectedCategoryId;
+      }
+      // Add store filter when a store is selected
+      if (selectedStoreId && selectedStoreId !== "all") {
+        params.storeId = selectedStoreId;
       }
 
       const response = await itemsAPI.getStockWithBatches(params);
@@ -222,6 +275,7 @@ export default function Reports() {
 
     let chartData = [];
     let tableData = [];
+    let storeItemsMap = {};
 
     if (type === "monthly") {
       // Process by month
@@ -267,6 +321,36 @@ export default function Reports() {
       // Use supplier data for charts
       chartData = Object.values(supplierData).sort((a, b) => b.value - a.value);
       tableData = Object.values(supplierData).sort((a, b) => b.value - a.value);
+    } else if (type === "storewise") {
+      // Group by store and also aggregate items per store
+      const storeAgg = {};
+      storeItemsMap = {};
+      pos.forEach(po => {
+        const storeName = po.store?.name || 'Unknown';
+        const storeId = po.store?._id || po.store || 'unknown';
+        if (!storeAgg[storeName]) {
+          storeAgg[storeName] = { store: storeName, pos: 0, value: 0, items: 0 };
+        }
+        storeAgg[storeName].pos += 1;
+        storeAgg[storeName].value += po.total || 0;
+        storeAgg[storeName].items += po.totalQuantity || 0;
+
+        if (!storeItemsMap[storeId]) storeItemsMap[storeId] = {};
+        (po.items || []).forEach(it => {
+          const key = it.sku || it.itemName;
+          if (!key) return;
+          if (!storeItemsMap[storeId][key]) {
+            storeItemsMap[storeId][key] = {
+              sku: it.sku || '',
+              itemName: it.itemName || 'Unknown',
+              totalQuantity: 0,
+            };
+          }
+          storeItemsMap[storeId][key].totalQuantity += it.quantity || 0;
+        });
+      });
+      chartData = Object.values(storeAgg).sort((a, b) => b.value - a.value);
+      tableData = Object.values(storeAgg).sort((a, b) => b.value - a.value);
     }
 
     const totalValue = pos.reduce((sum, po) => sum + (po.total || 0), 0);
@@ -286,7 +370,8 @@ export default function Reports() {
       chartData,
       tableData,
       supplierData: Object.values(supplierData).sort((a, b) => b.value - a.value),
-      rawData: pos.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate))
+      rawData: pos.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate)),
+      storeItemsMap
     };
   };
 
@@ -523,63 +608,7 @@ export default function Reports() {
         </Button>
       </motion.div>
 
-      {/* Stock Report Filters */}
-      {activeTab === "purchase" && poReportType === "stock" && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="h-5 w-5" />
-                Stock Report Filters
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-4">
-                <div className="space-y-2">
-                  <Label htmlFor="stockCategory">Category</Label>
-                  <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
-                    <SelectTrigger id="stockCategory">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      {categories.map((category) => (
-                        <SelectItem key={category._id} value={category._id}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Export</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        // TODO: Implement export for stock report
-                        toast({
-                          title: "Coming Soon",
-                          description: "Export functionality will be available soon",
-                        });
-                      }}
-                      className="flex-1"
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Export
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {(activeTab === "sales" || (activeTab === "purchase" && poReportType !== "stock")) && (
+      {(activeTab === "sales" || activeTab === "purchase") && (
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -592,7 +621,7 @@ export default function Reports() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`grid gap-4 ${activeTab === "sales" ? "md:grid-cols-4" : "md:grid-cols-5"}`}>
+            <div className={`grid gap-4 ${activeTab === "sales" ? "md:grid-cols-4" : "md:grid-cols-6"}`}>
               {activeTab === "sales" ? (
                 <>
               <div className="space-y-2">
@@ -682,6 +711,7 @@ export default function Reports() {
                         <SelectItem value="monthly">Monthly Report</SelectItem>
                         <SelectItem value="daily">Daily Report</SelectItem>
                         <SelectItem value="supplierwise">Supplier-wise Report</SelectItem>
+                        <SelectItem value="storewise">Store-wise Report</SelectItem>
                         <SelectItem value="stock">Stock with Batches</SelectItem>
                       </SelectContent>
                     </Select>
@@ -736,6 +766,51 @@ export default function Reports() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="store">Store</Label>
+                    <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
+                      <SelectTrigger id="store">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Stores</SelectItem>
+                        {stores.map((store) => (
+                          <SelectItem key={store._id} value={store._id}>
+                            {store.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {poReportType === "stock" && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="stockCategory">Category</Label>
+                        <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+                          <SelectTrigger id="stockCategory">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Categories</SelectItem>
+                            {categories.map((category) => (
+                              <SelectItem key={category._id} value={category._id}>
+                                {category.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="stockSearch">Search</Label>
+                        <Input
+                          id="stockSearch"
+                          placeholder="Search by item name or SKU..."
+                          value={stockSearch}
+                          onChange={(e) => setStockSearch(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -1020,15 +1095,16 @@ export default function Reports() {
                       {poReportType === "monthly" && "Monthly Purchase Orders"}
                       {poReportType === "daily" && "Daily Purchase Orders"}
                       {poReportType === "supplierwise" && "Supplier-wise Purchase Orders"}
+                      {poReportType === "storewise" && "Store-wise Purchase Orders"}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={300}>
-                      {poReportType === "supplierwise" ? (
+                      {poReportType === "supplierwise" || poReportType === "storewise" ? (
                         <BarChart data={poReportData.chartData}>
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                           <XAxis 
-                            dataKey="supplier" 
+                            dataKey={poReportType === "supplierwise" ? "supplier" : "store"}
                             className="text-xs"
                             angle={-45}
                             textAnchor="end"
@@ -1075,21 +1151,21 @@ export default function Reports() {
               >
                 <Card>
                   <CardHeader>
-                    <CardTitle>Supplier-wise Purchase Orders</CardTitle>
+                    <CardTitle>{poReportType === "storewise" ? "Store-wise Purchase Orders" : "Supplier-wise Purchase Orders"}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
                         <Pie
-                          data={poReportData.supplierData}
+                          data={poReportType === "storewise" ? poReportData.chartData : poReportData.supplierData}
                           dataKey="value"
-                          nameKey="supplier"
+                          nameKey={poReportType === "storewise" ? "store" : "supplier"}
                           cx="50%"
                           cy="50%"
                           outerRadius={100}
                           label
                         >
-                          {poReportData.supplierData.map((entry, index) => (
+                          {(poReportType === "storewise" ? poReportData.chartData : poReportData.supplierData).map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
@@ -1115,6 +1191,7 @@ export default function Reports() {
                     {poReportType === "monthly" && "Monthly Purchase Order Summary"}
                     {poReportType === "daily" && "Daily Purchase Order Summary"}
                     {poReportType === "supplierwise" && "Supplier-wise Purchase Order Summary"}
+                    {poReportType === "storewise" && "Store-wise Purchase Order Summary"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1125,6 +1202,7 @@ export default function Reports() {
                           {poReportType === "monthly" && <TableHead>Month</TableHead>}
                           {poReportType === "daily" && <TableHead>Date</TableHead>}
                           {poReportType === "supplierwise" && <TableHead>Supplier</TableHead>}
+                          {poReportType === "storewise" && <TableHead>Store</TableHead>}
                           <TableHead className="text-right">POs</TableHead>
                           <TableHead className="text-right">Total Value (₹)</TableHead>
                           <TableHead className="text-right">Items</TableHead>
@@ -1137,6 +1215,7 @@ export default function Reports() {
                               {poReportType === "monthly" && row.month}
                               {poReportType === "daily" && row.day}
                               {poReportType === "supplierwise" && row.supplier}
+                              {poReportType === "storewise" && row.store}
                             </TableCell>
                             <TableCell className="text-right">{row.pos || 0}</TableCell>
                             <TableCell className="text-right">₹{(row.value || 0).toFixed(2)}</TableCell>
@@ -1148,6 +1227,75 @@ export default function Reports() {
                   </div>
                 </CardContent>
               </Card>
+
+              {poReportType === "storewise" && selectedStoreId !== "all" && stockWithBatches.length > 0 && (
+                <Card className="mt-4">
+                  <CardHeader>
+                    <CardTitle>Items with Batches available for selected store</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Item Name</TableHead>
+                            <TableHead>SKU</TableHead>
+                            <TableHead>Category</TableHead>
+                            <TableHead>Subcategory</TableHead>
+                            <TableHead>Batch Number</TableHead>
+                            <TableHead className="text-right">Quantity</TableHead>
+                            <TableHead>PO Number</TableHead>
+                            <TableHead>Purchase Date</TableHead>
+                            <TableHead className="text-right">Cost Price (₹)</TableHead>
+                            <TableHead>HSN Number</TableHead>
+                            <TableHead>Expiry Date</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {stockWithBatches.map((stock, index) => (
+                            <TableRow key={`${stock.sku}-${stock.batchNumber}-${index}`}>
+                              <TableCell className="font-medium">{stock.itemName}</TableCell>
+                              <TableCell>{stock.sku}</TableCell>
+                              <TableCell>{stock.categoryName}</TableCell>
+                              <TableCell>{stock.subcategoryName}</TableCell>
+                              <TableCell>{stock.batchNumber}</TableCell>
+                              <TableCell className="text-right">{stock.batchQuantity}</TableCell>
+                              <TableCell>{stock.purchaseOrderNumber}</TableCell>
+                              <TableCell>
+                                {stock.purchaseDate 
+                                  ? new Date(stock.purchaseDate).toLocaleDateString()
+                                  : 'N/A'}
+                              </TableCell>
+                              <TableCell className="text-right">₹{stock.costPrice.toFixed(2)}</TableCell>
+                              <TableCell>{stock.hsnNumber}</TableCell>
+                              <TableCell>
+                                {stock.expiryDate 
+                                  ? new Date(stock.expiryDate).toLocaleDateString('en-GB', {
+                                      day: '2-digit',
+                                      month: '2-digit',
+                                      year: 'numeric'
+                                    })
+                                  : 'N/A'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+              {poReportType === "storewise" && selectedStoreId !== "all" && stockWithBatches.length === 0 && !stockLoading && (
+                <Card className="mt-4">
+                  <CardContent className="pt-6">
+                    <div className="text-center py-12">
+                      <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-semibold mb-2">No items available for this store</h3>
+                      <p className="text-muted-foreground">No batches found for the selected store</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
               
               {/* Detailed PO Table (only when detailed view) */}
               {poViewMode === "detailed" && poReportData.rawData && poReportData.rawData.length > 0 && (

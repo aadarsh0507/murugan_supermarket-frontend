@@ -11,7 +11,7 @@ const initialState = {
 };
 
 // Action types
-const AUTH_ACTIONS = {
+const   AUTH_ACTIONS = {
   LOGIN_START: 'LOGIN_START',
   LOGIN_SUCCESS: 'LOGIN_SUCCESS',
   LOGIN_FAILURE: 'LOGIN_FAILURE',
@@ -23,6 +23,7 @@ const AUTH_ACTIONS = {
   LOAD_USER_SUCCESS: 'LOAD_USER_SUCCESS',
   LOAD_USER_FAILURE: 'LOAD_USER_FAILURE',
   UPDATE_USER: 'UPDATE_USER',
+  UPDATE_SELECTED_STORE: 'UPDATE_SELECTED_STORE',
   CLEAR_ERROR: 'CLEAR_ERROR',
 };
 
@@ -67,6 +68,16 @@ const authReducer = (state, action) => {
         user: action.payload.user,
         isAuthenticated: true,
         isLoading: false,
+        error: null,
+      };
+
+    case AUTH_ACTIONS.UPDATE_SELECTED_STORE:
+      return {
+        ...state,
+        user: {
+          ...state.user,
+          selectedStore: action.payload.selectedStore
+        },
         error: null,
       };
 
@@ -243,6 +254,14 @@ export const AuthProvider = ({ children }) => {
     return state.user?.department === department || state.user?.role === 'admin';
   };
 
+  // Update selected store
+  const updateSelectedStore = (selectedStore) => {
+    dispatch({
+      type: AUTH_ACTIONS.UPDATE_SELECTED_STORE,
+      payload: { selectedStore }
+    });
+  };
+
   const value = {
     // State
     user: state.user,
@@ -250,6 +269,7 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated: state.isAuthenticated,
     isLoading: state.isLoading,
     error: state.error,
+    selectedStore: state.user?.selectedStore || null,
     
     // Actions
     login,
@@ -257,6 +277,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     updateProfile,
     changePassword,
+    updateSelectedStore,
     clearError,
     
     // Utility functions

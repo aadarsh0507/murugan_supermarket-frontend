@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { purchaseOrdersAPI, suppliersAPI, categoriesAPI } from "@/services/api";
 import BarcodeLabel from "@/components/BarcodeLabel";
+import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -31,6 +32,7 @@ import { format } from "date-fns";
 
 const PurchaseOrders = () => {
   const { toast } = useToast();
+  const { selectedStore } = useAuth();
   const [suppliers, setSuppliers] = useState([]);
   const [stores, setStores] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -81,9 +83,26 @@ const PurchaseOrders = () => {
     totalAmount: 0
   });
 
+  // Load data when component mounts or when selected store changes
   useEffect(() => {
-    loadData();
-  }, []);
+    if (selectedStore?._id) {
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStore]);
+
+  // Auto-populate store field with selected store from header
+  useEffect(() => {
+    if (selectedStore?._id) {
+      setFormData(prev => {
+        // Update store if it's empty or different from selected store
+        if (!prev.store || prev.store !== selectedStore._id) {
+          return { ...prev, store: selectedStore._id };
+        }
+        return prev;
+      });
+    }
+  }, [selectedStore]);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -98,6 +117,11 @@ const PurchaseOrders = () => {
   }, [openSuggestIndex]);
 
   const loadData = async () => {
+    // Don't load if no store is selected
+    if (!selectedStore?._id) {
+      return;
+    }
+
     setLoading(true);
     try {
       const [suppliersRes, storesRes] = await Promise.all([
@@ -108,6 +132,7 @@ const PurchaseOrders = () => {
       setStores(storesRes.data);
 
       // Fetch categories with embedded items to build item list
+      // Categories are already filtered by store on the backend based on selectedStore
       let cats = [];
       try {
         const hierarchyRes = await categoriesAPI.getCategoryHierarchy();
@@ -121,24 +146,38 @@ const PurchaseOrders = () => {
           console.error('Error loading categories:', e2);
         }
       }
-      setCategories(cats);
+      
+      // Filter categories by selected store
+      const storeId = selectedStore._id.toString();
+      const filteredCats = cats.filter(cat => {
+        const catStoreId = cat.store?._id?.toString() || cat.store?.toString();
+        return catStoreId === storeId;
+      });
+      
+      setCategories(filteredCats);
 
       // Flatten embedded items from categories/subcategories
+      // Only include items that belong to the selected store
       const flattened = [];
-      cats.forEach(cat => {
+      filteredCats.forEach(cat => {
         (cat.subcategories || []).forEach(sub => {
           (sub.items || []).forEach(item => {
-            flattened.push({
-              _id: item._id,
-              name: item.name,
-              sku: item.sku,
-              price: item.price,
-              cost: item.cost,
-              unit: item.unit,
-              category: cat.name,
-              subcategory: sub.name,
-              hsnCode: item.hsnCode,
-            });
+            // Double-check item belongs to the selected store
+            const itemStoreId = item.store?._id?.toString() || item.store?.toString() || cat.store?._id?.toString() || cat.store?.toString();
+            if (itemStoreId === storeId) {
+              flattened.push({
+                _id: item._id,
+                name: item.name,
+                sku: item.sku,
+                price: item.price,
+                cost: item.cost,
+                unit: item.unit,
+                category: cat.name,
+                subcategory: sub.name,
+                hsnCode: item.hsnCode,
+                store: itemStoreId,
+              });
+            }
           });
         });
       });
@@ -426,15 +465,23 @@ const PurchaseOrders = () => {
       console.error('Error saving purchase order:', error);
       
       // Handle validation errors specifically
-      let errorMessage = error.message || "Failed to save purchase order";
-      if (error.response && error.response.data && error.response.data.errors) {
-        const validationErrors = error.response.data.errors;
-        console.error("Validation errors:", validationErrors);
-        const errorMessages = validationErrors.map(err => {
-          const field = err.path || err.param || 'field';
-          return `${field}: ${err.msg}`;
-        });
-        errorMessage = `Validation failed:\n${errorMessages.join('\n')}`;
+      let errorMessage = "Failed to save purchase order";
+      
+      // Prioritize the message from backend if available
+      if (error.response && error.response.data) {
+        if (error.response.data.message) {
+          errorMessage = error.response.data.message;
+        } else if (error.response.data.errors && error.response.data.errors.length > 0) {
+          const validationErrors = error.response.data.errors;
+          console.error("Validation errors:", validationErrors);
+          const errorMessages = validationErrors.map(err => {
+            const field = err.path || err.param || 'field';
+            return `${field}: ${err.msg}`;
+          });
+          errorMessage = `Validation failed:\n${errorMessages.join('\n')}`;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
       }
       
       toast({ 
@@ -453,7 +500,7 @@ const PurchaseOrders = () => {
       supplier: "",
       supplierName: "",
       supplierDetails: null,
-      store: "",
+      store: selectedStore?._id || "",
       quotationDate: new Date().toISOString().split('T')[0],
       validDate: "",
       dueDate: "",
@@ -900,7 +947,7 @@ const PurchaseOrders = () => {
                         // Encode SKU so scanners return SKU text
                         sku={group.itemSku}
                         barcode={barcodeItem.barcode}
-                        storeName={group.storeName}
+                        storeName={selectedStore?.name || group.storeName}
                         itemName={group.itemName}
                         expiryDate={group.expiryDate}
                         amount={group.amount}

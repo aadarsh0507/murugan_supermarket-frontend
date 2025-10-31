@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Helper function to calculate EAN-13 checksum
 function calculateEAN13Checksum(digits) {
@@ -47,6 +48,10 @@ function fixBarcodeToEAN13(barcode) {
 const BarcodeLabel = ({ barcode, sku, storeName, itemName, expiryDate, amount, batchNumber, onCanvasReady }) => {
   const canvasRef = useRef(null);
   const [barcodeError, setBarcodeError] = useState(false);
+  const { selectedStore } = useAuth();
+  
+  // Use selected store name from header if storeName prop is not provided or use default
+  const displayStoreName = storeName || selectedStore?.name || "Murugan Super Market";
 
   useEffect(() => {
     const valueToEncode = (sku && String(sku).trim()) || (barcode && String(barcode).trim());
@@ -102,17 +107,24 @@ const BarcodeLabel = ({ barcode, sku, storeName, itemName, expiryDate, amount, b
     <div className="border-2 border-gray-800 p-2 bg-white" style={{ width: "300px", minHeight: "150px" }}>
       {/* Store Name */}
       <div className="text-center font-bold text-lg mb-1 border-b-2 border-gray-800 pb-1">
-        {storeName || "Murugan Supermarket"}
+        {displayStoreName}
       </div>
       
       {/* Barcode */}
-      <div className="flex justify-center mb-2 min-h-[60px] items-center">
+      <div className="flex flex-col items-center mb-2 min-h-[60px]">
         {barcodeError ? (
           <div className="text-center text-xs text-red-600 border border-red-300 p-2 rounded">
             Invalid barcode format
           </div>
         ) : (
-          <canvas ref={canvasRef} className="max-w-full" />
+          <>
+            <canvas ref={canvasRef} className="max-w-full" />
+            {sku && (
+              <div className="text-xs font-mono mt-1 text-center">
+                SKU: {sku}
+              </div>
+            )}
+          </>
         )}
       </div>
       

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { DataTable } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -16,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { usersAPI } from "@/services/api";
+import { usersAPI, suppliersAPI } from "@/services/api";
 
 const roleColors = {
   admin: "bg-blue-500",
@@ -48,6 +49,8 @@ export default function Users() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [formData, setFormData] = useState({});
+  const [stores, setStores] = useState([]);
+  const [loadingStores, setLoadingStores] = useState(false);
   const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -59,7 +62,25 @@ export default function Users() {
   // Fetch users from API
   useEffect(() => {
     fetchUsers();
+    fetchStores();
   }, []);
+
+  const fetchStores = async () => {
+    try {
+      setLoadingStores(true);
+      const response = await suppliersAPI.getStores({ isActive: true });
+      setStores(response.data?.stores || response.data || []);
+    } catch (error) {
+      console.error('Error fetching stores:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch stores from database",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingStores(false);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -99,7 +120,8 @@ export default function Users() {
       role: "employee",
       department: "sales",
       phone: "",
-      isActive: true
+      isActive: true,
+      stores: []
     });
     setIsModalOpen(true);
   };
@@ -113,7 +135,8 @@ export default function Users() {
       role: user.role,
       department: user.department,
       phone: user.phone,
-      isActive: user.isActive
+      isActive: user.isActive,
+      stores: user.stores?.map(store => typeof store === 'object' ? store._id : store) || []
     });
     setIsModalOpen(true);
   };
@@ -413,6 +436,51 @@ export default function Users() {
                 <SelectItem value="false">Inactive</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Stores</Label>
+            <div className="border rounded-md p-4 max-h-60 overflow-y-auto">
+              {loadingStores ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="ml-2 text-sm text-muted-foreground">Loading stores...</span>
+                </div>
+              ) : stores.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No stores available</p>
+              ) : (
+                <div className="space-y-2">
+                  {stores.map((store) => (
+                    <div key={store._id} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`store-${store._id}`}
+                        checked={formData.stores?.includes(store._id) || false}
+                        onCheckedChange={(checked) => {
+                          const currentStores = formData.stores || [];
+                          if (checked) {
+                            setFormData({
+                              ...formData,
+                              stores: [...currentStores, store._id]
+                            });
+                          } else {
+                            setFormData({
+                              ...formData,
+                              stores: currentStores.filter(id => id !== store._id)
+                            });
+                          }
+                        }}
+                      />
+                      <Label
+                        htmlFor={`store-${store._id}`}
+                        className="text-sm font-normal cursor-pointer"
+                      >
+                        {store.name} {store.code && `(${store.code})`}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-3 pt-4">

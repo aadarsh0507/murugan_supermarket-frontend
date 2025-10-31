@@ -15,9 +15,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
 export function Navbar() {
-  const { user, logout } = useAuth();
+  const { user, logout, selectedStore } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  // Get store name from selected store, default to "Murugan Super Market"
+  const storeName = selectedStore?.name || "Murugan Super Market";
+  // Get store initials from store name or default to "MS"
+  const storeInitials = selectedStore?.name 
+    ? selectedStore.name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2)
+    : "MS";
 
   const handleLogout = async () => {
     try {
@@ -57,10 +64,10 @@ export function Navbar() {
       <div className="flex h-16 items-center px-6 gap-4">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-lg">MS</span>
+            <span className="text-primary-foreground font-bold text-lg">{storeInitials}</span>
           </div>
           <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            Murugan Super Market
+            {storeName}
           </h1>
         </div>
 

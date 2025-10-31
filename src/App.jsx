@@ -17,6 +17,7 @@ import Users from "./pages/Users";
 import Reports from "./pages/Reports";
 import Suppliers from "./pages/Suppliers";
 import Stores from "./pages/Stores";
+import SelectStore from "./pages/SelectStore";
 import PurchaseOrders from "./pages/PurchaseOrders";
 import NotFound from "./pages/NotFound";
 
@@ -107,6 +108,14 @@ const App = () => (
               element={
                 <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <Layout><Stores /></Layout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/select-store" 
+              element={
+                <ProtectedRoute skipStoreCheck={true}>
+                  <Layout><SelectStore /></Layout>
                 </ProtectedRoute>
               } 
             />
