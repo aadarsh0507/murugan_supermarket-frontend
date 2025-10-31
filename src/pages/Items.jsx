@@ -24,13 +24,13 @@ import BillModal from "@/components/BillModal";
 export default function Items() {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { user, hasRole } = useAuth();
+  const { user, hasRole, selectedStore } = useAuth();
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [subcategories, setSubcategories] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const [selectedStatus, setSelectedStatus] = useState("all"); // New status filter
+  const [selectedStatus, setSelectedStatus] = useState("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [formData, setFormData] = useState({});
@@ -46,10 +46,12 @@ export default function Items() {
   const [discountAmount, setDiscountAmount] = useState(0);
   const [itemImages, setItemImages] = useState([]);
   const [uploadingImages, setUploadingImages] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
+  const [isScanning, setIsScanning] = useState(true); // Default to scanning mode enabled
   const [barcodeInput, setBarcodeInput] = useState("");
   const [lastScanned, setLastScanned] = useState(null); // { sku, name, time }
   const [selectedBatch, setSelectedBatch] = useState(null); // Selected batch for barcode printing
+  const [isProcessingScan, setIsProcessingScan] = useState(false); // Prevent duplicate scans
+  const [lastScannedBarcode, setLastScannedBarcode] = useState(""); // Track last scanned barcode to prevent exact duplicate
 
   // Check if user is admin
   const isAdmin = hasRole('admin');
@@ -61,18 +63,63 @@ export default function Items() {
     loadNoMovementItems();
   }, []);
 
-  // Auto-detect fast scanner input in the search box (supports numeric and alphanumeric SKUs)
+  // Auto-focus barcode input when component mounts or scanning mode is enabled
   useEffect(() => {
-    const trimmedValue = searchTerm.trim();
-    // Typical scans dump a burst of chars; accept 6+ safe SKU/barcode chars
-    if (trimmedValue.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedValue)) {
+    if (isScanning) {
+      // Small delay to ensure DOM is ready
       const timer = setTimeout(() => {
-        handleBarcodeScan(trimmedValue);
-        setSearchTerm("");
-      }, 500);
+        const barcodeInputElement = document.getElementById('barcode-scan-input');
+        if (barcodeInputElement) {
+          barcodeInputElement.focus();
+        } else {
+          // If barcode input not found, focus search field
+          const searchInput = document.querySelector('input[placeholder*="Search by name, SKU"]');
+          if (searchInput) {
+            searchInput.focus();
+          }
+        }
+      }, 100);
       return () => clearTimeout(timer);
     }
-  }, [searchTerm]);
+  }, [isScanning]);
+
+  // Auto-detect fast scanner input in the search box (supports numeric and alphanumeric SKUs)
+  useEffect(() => {
+    // Don't auto-trigger if already processing a scan
+    if (isProcessingScan) return;
+    
+    const trimmedValue = searchTerm.trim();
+    // Typical scans dump a burst of chars; accept 6+ safe SKU/barcode chars
+    // Also check it's different from the last scanned barcode to allow multiple items
+    if (trimmedValue.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedValue) && trimmedValue !== lastScannedBarcode) {
+      const timer = setTimeout(() => {
+        if (!isProcessingScan && searchTerm.trim() === trimmedValue) {
+          handleBarcodeScan(trimmedValue);
+          setSearchTerm("");
+        }
+      }, 300); // Reduced timeout for faster scanning
+      return () => clearTimeout(timer);
+    }
+  }, [searchTerm, isProcessingScan, lastScannedBarcode]);
+
+  // Auto-detect fast scanner input in the barcode input field (cart modal or scanning mode)
+  useEffect(() => {
+    // Don't auto-trigger if already processing a scan
+    if (isProcessingScan) return;
+    
+    const trimmedValue = barcodeInput.trim();
+    // Typical scans dump a burst of chars; accept 6+ safe SKU/barcode chars
+    // Also check it's different from the last scanned barcode to allow multiple items
+    if (trimmedValue.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedValue) && trimmedValue !== lastScannedBarcode) {
+      const timer = setTimeout(() => {
+        if (!isProcessingScan && barcodeInput.trim() === trimmedValue) {
+          handleBarcodeScan(trimmedValue);
+          setBarcodeInput("");
+        }
+      }, 300); // Reduced timeout for faster scanning
+      return () => clearTimeout(timer);
+    }
+  }, [barcodeInput, isProcessingScan, lastScannedBarcode]);
 
 
   const loadItems = async () => {
@@ -164,10 +211,10 @@ export default function Items() {
     const lowStockItemSkus = lowStockItems.map(item => item.sku);
     const noMovementItemSkus = noMovementItems.map(item => item.sku);
     
-    if (noMovementItemSkus.includes(item.sku)) {
-      return "bg-yellow-50 border-yellow-200"; // No movement - yellow
-    } else if (lowStockItemSkus.includes(item.sku)) {
-      return "bg-red-50 border-red-200"; // Low stock - red
+    if (lowStockItemSkus.includes(item.sku)) {
+      return "bg-red-100 border-red-400 border-2"; // Low stock - prominent red with thicker border
+    } else if (noMovementItemSkus.includes(item.sku)) {
+      return "bg-blue-50 border-blue-300"; // No movement - blue
     } else {
       return "bg-white border-gray-200"; // Normal stock - white
     }
@@ -178,10 +225,10 @@ export default function Items() {
     const lowStockItemSkus = lowStockItems.map(item => item.sku);
     const noMovementItemSkus = noMovementItems.map(item => item.sku);
     
-    if (noMovementItemSkus.includes(item.sku)) {
-      return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">No Movement</Badge>;
-    } else if (lowStockItemSkus.includes(item.sku)) {
-      return <Badge variant="destructive" className="bg-red-100 text-red-800">Low Stock</Badge>;
+    if (lowStockItemSkus.includes(item.sku)) {
+      return <Badge variant="destructive" className="bg-red-500 text-white font-semibold">Low Stock</Badge>;
+    } else if (noMovementItemSkus.includes(item.sku)) {
+      return <Badge variant="secondary" className="bg-blue-100 text-blue-800">No Movement</Badge>;
     } else {
       return <Badge variant="default" className="bg-green-100 text-green-800">In Stock</Badge>;
     }
@@ -200,6 +247,7 @@ export default function Items() {
 
   // Filter items based on search, category selection, and status
   const filteredItems = items.filter((item) => {
+    
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -372,16 +420,16 @@ export default function Items() {
       return;
     }
 
-    // Ensure price is GREATER than cost price when cost is provided
+    // Ensure price is greater than or equal to cost price when cost is provided
     if (
       formData.cost !== "" &&
       !isNaN(parseFloat(formData.cost)) &&
       !isNaN(parseFloat(formData.price)) &&
-      parseFloat(formData.price) <= parseFloat(formData.cost)
+      parseFloat(formData.price) < parseFloat(formData.cost)
     ) {
       toast({
         title: "Validation Error",
-        description: "Price must be greater than cost price",
+        description: "Price must be greater than or equal to cost price",
         variant: "destructive",
       });
       return;
@@ -456,6 +504,11 @@ export default function Items() {
     console.log("ItemImages length:", itemImages ? itemImages.length : 'undefined');
 
     try {
+      // Include store name if available (backend will also set it, but include for completeness)
+      if (selectedStore?.name) {
+        cleanedSubmitData.storeName = selectedStore.name;
+      }
+
       if (editingItem) {
         console.log('Updating item with ID:', editingItem._id);
         console.log('Editing item object:', editingItem);
@@ -648,10 +701,10 @@ export default function Items() {
       
       // Create display data for modal
       const displayData = {
-        storeName: "MURUGAN SUPER STORE",
-        address: "No.25, Loop Road, Acharapakkam - 603301",
-        phone: "Ph: 044-27522026",
-        gstNumber: "GST No.: 33AWOPD0029J1ZS",
+        storeName: selectedStore?.name || "Murugan Super Market",
+        address: selectedStore?.address ? `${selectedStore.address.street || ''}, ${selectedStore.address.city || ''} - ${selectedStore.address.zipCode || ''}`.replace(/^,\s*|,\s*$/g, '') : "No.25, Loop Road, Acharapakkam - 603301",
+        phone: selectedStore?.phone ? `Ph: ${selectedStore.phone}` : "Ph: 044-27522026",
+        gstNumber: selectedStore?.gstNumber ? `GST No.: ${selectedStore.gstNumber}` : "GST No.: 33AWOPD0029J1ZS",
         date: new Date().toLocaleDateString('en-GB', { 
           day: '2-digit', 
           month: 'short', 
@@ -739,14 +792,19 @@ export default function Items() {
       return sum + (mrp - item.price) * item.quantity;
     }, 0);
 
-    // Create JAYA SUPER STORE format bill
+    // Get store name from selected store
+    const storeName = selectedStore?.name || "Murugan Super Market";
+    const storeAddress = selectedStore?.address ? `${selectedStore.address.street || ''}, ${selectedStore.address.city || ''} - ${selectedStore.address.zipCode || ''}`.replace(/^,\s*|,\s*$/g, '') : 'No 25, Loop Road, Acharapakkam - 603301';
+    const storePhone = selectedStore?.phone ? `Ph. ${selectedStore.phone}` : 'Ph. 044-27522026';
+    
+    // Create bill format
     const billContent = `
       <div style="font-family: monospace; max-width: 300px; margin: 0 auto; padding: 20px; font-size: 12px; line-height: 1.2;">
         <!-- Store Header -->
         <div style="text-align: center; margin-bottom: 15px;">
-          <h1 style="font-size: 16px; font-weight: bold; text-transform: uppercase; margin: 0;">MURUGAN SUPER MARKET</h1>
-          <p style="margin: 2px 0; font-size: 10px;">No 25, Loop Road, Acharapakkam - 603301</p>
-          <p style="margin: 2px 0; font-size: 10px;">Ph. 044-27522026</p>
+          <h1 style="font-size: 16px; font-weight: bold; text-transform: uppercase; margin: 0;">${storeName.toUpperCase()}</h1>
+          <p style="margin: 2px 0; font-size: 10px;">${storeAddress}</p>
+          <p style="margin: 2px 0; font-size: 10px;">${storePhone}</p>
           <p style="margin: 2px 0; font-size: 10px;">GST No 33AWOPD5029J1ZS</p>
         </div>
 
@@ -940,7 +998,24 @@ export default function Items() {
       return;
     }
 
+    const normalizedBarcode = scannedBarcode.trim();
+
+    // Prevent duplicate scans of the exact same barcode within 2 seconds
+    // Allow different barcodes to be scanned rapidly for multiple items
+    if (isProcessingScan) {
+      return;
+    }
+    
+    // Only block if it's the exact same barcode scanned very recently (within 1 second)
+    // This allows rapid scanning of different items while preventing duplicate scans of the same item
+    const now = Date.now();
+    if (lastScannedBarcode === normalizedBarcode && lastScanned && lastScanned.time && (now - lastScanned.time) < 1000) {
+      return;
+    }
+
+    setIsProcessingScan(true);
     setIsScanning(true);
+    setLastScannedBarcode(normalizedBarcode);
     try {
       // First try to get item from barcode API (PO generated barcodes)
       let itemData = null;
@@ -1010,21 +1085,36 @@ export default function Items() {
       }
 
       // Persist last scanned data for on-screen display
-      setLastScanned({ sku: itemData.sku, name: itemData.name, time: new Date() });
+      const scanTime = Date.now();
+      setLastScanned({ sku: itemData.sku, name: itemData.name, time: scanTime });
 
       toast({
         title: "Item Scanned",
-        description: `SKU: ${itemData.sku} • ${itemData.name} (qty: 1)`,
+        description: `SKU: ${itemData.sku} • ${itemData.name} (qty: ${existingItem ? existingItem.quantity + 1 : 1})`,
       });
 
-      // Reflect resolved SKU in inputs so users see SKU instead of raw numbers
-      setSearchTerm(itemData.sku || "");
-      setBarcodeInput(itemData.sku || "");
+      // Clear search inputs immediately to allow next scan
+      setSearchTerm("");
+      setBarcodeInput("");
       
-      // Optionally open cart or billing modal
-      if (cart.length === 0) {
-        setIsCartOpen(true);
-      }
+      // Keep cart open when items are being scanned (for multiple item scanning)
+      setIsCartOpen(true);
+      
+      // Auto-focus appropriate input field for next scan to enable continuous scanning
+      setTimeout(() => {
+        // Prioritize cart barcode input if cart is open, then regular barcode input, then search field
+        const cartBarcodeInput = document.getElementById('cart-barcode-input');
+        const barcodeInput = document.getElementById('barcode-scan-input');
+        const searchInput = document.querySelector('input[placeholder*="Search by name, SKU"]');
+        
+        if (cartBarcodeInput) {
+          cartBarcodeInput.focus();
+        } else if (barcodeInput) {
+          barcodeInput.focus();
+        } else if (searchInput) {
+          searchInput.focus();
+        }
+      }, 100);
     } catch (error) {
       console.error("Error scanning barcode:", error);
       toast({
@@ -1034,20 +1124,37 @@ export default function Items() {
       });
       setBarcodeInput("");
     } finally {
-      setIsScanning(false);
+      // Don't disable scanning - keep it enabled by default
+      // Allow next scan quickly (300ms) to enable rapid scanning of multiple items
+      // The lastScannedBarcode check will prevent exact duplicate scans
+      setTimeout(() => {
+        setIsProcessingScan(false);
+      }, 300);
     }
   };
 
   const handleScanButtonClick = () => {
-    setIsScanning(true);
-    setBarcodeInput("");
-    // Focus the barcode input when scanning mode is enabled
-    setTimeout(() => {
-      const barcodeInputElement = document.getElementById('barcode-scan-input');
-      if (barcodeInputElement) {
-        barcodeInputElement.focus();
+    // Toggle scanning mode - user can manually disable/enable it
+    setIsScanning(prev => {
+      const newValue = !prev;
+      // If enabling scanning, focus the input after state update
+      if (newValue) {
+        setTimeout(() => {
+          const barcodeInputElement = document.getElementById('barcode-scan-input');
+          if (barcodeInputElement) {
+            barcodeInputElement.focus();
+          } else {
+            // Fallback to search field if barcode input not available
+            const searchInput = document.querySelector('input[placeholder*="Search by name, SKU"]');
+            if (searchInput) {
+              searchInput.focus();
+            }
+          }
+        }, 100);
       }
-    }, 100);
+      return newValue;
+    });
+    setBarcodeInput("");
   };
 
   const handleBarcodeInputKeyDown = (e) => {
@@ -1061,6 +1168,8 @@ export default function Items() {
   const ItemCard = ({ item }) => {
     const subcategoryName = item.subcategory?.name || "Unknown";
     const subcategoryColor = `bg-blue-100 text-blue-800`; // Default color
+    const lowStockItemSkus = lowStockItems.map(i => i.sku);
+    const isLowStock = lowStockItemSkus.includes(item.sku);
 
     return (
       <motion.div
@@ -1148,7 +1257,13 @@ export default function Items() {
               </div>
               <div className="flex justify-between text-xs md:text-sm">
                 <span className="font-medium">Stock:</span>
-                <span className={`${item.stock < (item.minStock || 10) ? 'text-destructive' : 'text-green-600'}`}>
+                <span className={`${
+                  isLowStock 
+                    ? 'text-red-600 font-bold' 
+                    : item.stock < (item.minStock || 10) 
+                    ? 'text-destructive font-semibold' 
+                    : 'text-green-600'
+                }`}>
                   {item.stock} {item.unit}
                 </span>
               </div>
@@ -1323,7 +1438,10 @@ export default function Items() {
           />
         </div>
         
-        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+        <Select 
+          value={selectedCategory} 
+          onValueChange={setSelectedCategory}
+        >
           <SelectTrigger className="w-full sm:w-48">
             <Filter className="h-4 w-4 mr-2" />
             <SelectValue placeholder="All Categories" />
@@ -1340,7 +1458,10 @@ export default function Items() {
         
         {/* Status Filter - Only show for admin users */}
         {isAdmin && (
-          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+          <Select 
+            value={selectedStatus} 
+            onValueChange={setSelectedStatus}
+          >
             <SelectTrigger className="w-full sm:w-48">
               <Filter className="h-4 w-4 mr-2" />
               <SelectValue placeholder="All Status" />
@@ -1746,7 +1867,7 @@ export default function Items() {
                       <SelectContent>
                         {editingItem.batches.map((batch, index) => (
                           <SelectItem key={index} value={String(index)}>
-                            Batch: {batch.batchNumber} - Stock: {batch.quantity} {formData.unit || 'units'}
+                            Batch: {batch.batchNumber} - Stock: {batch.quantity}
                             {batch.expiryDate && ` - Exp: ${new Date(batch.expiryDate).toLocaleDateString('en-GB')}`}
                           </SelectItem>
                         ))}
@@ -1754,7 +1875,7 @@ export default function Items() {
                     </Select>
                     {selectedBatch && (
                       <p className="text-xs text-muted-foreground">
-                        Selected: Batch {selectedBatch.batchNumber} - {selectedBatch.quantity} {formData.unit || 'units'} available
+                        Selected: Batch {selectedBatch.batchNumber} - {selectedBatch.quantity} available
                       </p>
                     )}
                   </div>
@@ -1788,6 +1909,7 @@ export default function Items() {
 
                       const storeName = 'Murugan Stores';
                       const itemName = formData.name || '';
+                      const itemSku = formData.sku || '';
                       const batchNumber = selectedBatch ? selectedBatch.batchNumber : (formData.batchNumber || '-');
                       const price = Number(formData.price || 0).toFixed(2);
                       const expiry = selectedBatch && selectedBatch.expiryDate 
@@ -1806,6 +1928,7 @@ export default function Items() {
                           <div class="label" style="page-break-after: always; margin-bottom: 2mm;">
                             <div class="header">${storeName}</div>
                             <div class="barcode">${imgData ? `<img src="${imgData}" />` : ''}</div>
+                            ${itemSku ? `<div style="text-align:center; font-size:10px; font-family:monospace; margin-top:1mm;">SKU: ${itemSku}</div>` : ''}
                             <div class="footer">
                               <div class="name">${itemName}</div>
                               <div>Batch: ${batchNumber || '-'}</div>
@@ -1859,7 +1982,7 @@ export default function Items() {
                 <BarcodeLabel
                   sku={formData.sku}
                   barcode={formData.barcode}
-                  storeName={"Murugan Stores"}
+                  storeName={selectedStore?.name}
                   itemName={formData.name}
                   amount={formData.price}
                   batchNumber={selectedBatch ? selectedBatch.batchNumber : (formData.batchNumber || '')}
@@ -1901,6 +2024,39 @@ export default function Items() {
         className="max-w-full mx-4 md:max-w-2xl"
       >
         <div className="space-y-3 md:space-y-4 max-h-[70vh] overflow-y-auto">
+          {/* Barcode Scanner in Cart Modal - Always visible when cart is open */}
+          <div className="bg-green-50 border-2 border-green-500 rounded-lg p-3 mb-3">
+            <div className="flex items-center gap-3">
+              <ScanLine className="h-5 w-5 text-green-600 animate-pulse" />
+              <div className="flex-1">
+                <Label htmlFor="cart-barcode-input" className="text-sm font-semibold text-green-800">
+                  Scan barcode to add more items...
+                </Label>
+                <Input
+                  id="cart-barcode-input"
+                  placeholder="Scan barcode or type barcode here..."
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Most barcode scanners send Enter key after scanning
+                    if (e.key === 'Enter' && barcodeInput.trim()) {
+                      e.preventDefault();
+                      handleBarcodeScan(barcodeInput.trim());
+                    }
+                  }}
+                  className="mt-2 text-sm md:text-base"
+                  autoFocus
+                />
+                {lastScanned && (
+                  <div className="mt-2 text-xs md:text-sm text-green-900">
+                    Last scanned: <span className="font-semibold">SKU {lastScanned.sku}</span>{' '}
+                    <span className="text-muted-foreground">— {lastScanned.name}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          
           {cart.length === 0 ? (
             <div className="text-center py-8">
               <ShoppingCart className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -2092,6 +2248,21 @@ export default function Items() {
         onClose={() => {
           setIsBillModalOpen(false);
           setCart([]); // Clear cart after bill is closed
+          setIsCartOpen(false); // Close cart modal
+          setIsScanning(true); // Re-enable scanning mode for next bill
+          // Focus barcode input after bill closes
+          setTimeout(() => {
+            const barcodeInputElement = document.getElementById('barcode-scan-input');
+            if (barcodeInputElement) {
+              barcodeInputElement.focus();
+            } else {
+              // Fallback to search field if barcode input not available
+              const searchInput = document.querySelector('input[placeholder*="Search by name, SKU"]');
+              if (searchInput) {
+                searchInput.focus();
+              }
+            }
+          }, 100);
         }} 
         billData={billData}
         isAdmin={isAdmin}

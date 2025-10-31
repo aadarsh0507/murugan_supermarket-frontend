@@ -1,13 +1,16 @@
 import React from 'react';
 import { X, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 
 const BillModal = ({ isOpen, onClose, billData, isAdmin = false }) => {
+  const { selectedStore } = useAuth();
+  
   if (!isOpen) return null;
 
   // Default data matching the JAYA SUPER STORE receipt exactly
   const defaultBillData = {
-    storeName: "JAYA SUPER STORE",
+    storeName: selectedStore?.name || "Murugan Super Market",
     address: "No.25, Loop Road, Acharapakkam - 603301",
     phone: "Ph: 044-27522026",
     gstNumber: "GST No.: 33AWOPD0029J1ZS",
@@ -47,6 +50,9 @@ const BillModal = ({ isOpen, onClose, billData, isAdmin = false }) => {
   };
 
   const data = billData || defaultBillData;
+  
+  // Use selected store name if available, otherwise use data.storeName or default
+  const displayStoreName = selectedStore?.name || data.storeName || "Murugan Super Market";
   
   const totalAmount = data.items.reduce((sum, item) => sum + parseFloat(item.netAmount), 0);
   const totalQty = data.items.reduce((sum, item) => sum + parseFloat(item.qty), 0);
@@ -210,10 +216,10 @@ const BillModal = ({ isOpen, onClose, billData, isAdmin = false }) => {
           <div id="bill-content" className="p-2 md:p-4 font-mono text-xs md:text-sm leading-tight bg-white">
             {/* Store Header */}
             <div className="text-center mb-3">
-              <h1 className="text-base font-bold uppercase">{data.storeName}</h1>
-              <p className="text-xs">{data.address}</p>
-              <p className="text-xs">{data.phone}</p>
-              <p className="text-xs">{data.gstNumber}</p>
+              <h1 className="text-base font-bold uppercase">{displayStoreName}</h1>
+              <p className="text-xs">{data.address || (selectedStore?.address ? `${selectedStore.address.street || ''}, ${selectedStore.address.city || ''} - ${selectedStore.address.zipCode || ''}`.replace(/^,\s*|,\s*$/g, '') : '')}</p>
+              <p className="text-xs">{data.phone || (selectedStore?.phone ? `Ph: ${selectedStore.phone}` : '')}</p>
+              <p className="text-xs">{data.gstNumber || ''}</p>
             </div>
 
             {/* Transaction Details */}

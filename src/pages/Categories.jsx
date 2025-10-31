@@ -363,10 +363,10 @@ const Categories = () => {
       return;
     }
 
-    if (typeof costNum !== 'undefined' && !isNaN(costNum) && priceNum <= costNum) {
+    if (typeof costNum !== 'undefined' && !isNaN(costNum) && priceNum < costNum) {
       toast({
         title: "Validation Error",
-        description: "Price must be greater than cost price",
+        description: "Price must be greater than or equal to cost price",
         variant: "destructive",
       });
       return;

@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
 const PublicRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, selectedStore } = useAuth();
 
   // Show loading spinner while checking authentication
   if (isLoading) {
@@ -17,8 +17,11 @@ const PublicRoute = ({ children }) => {
     );
   }
 
-  // Redirect to dashboard if already authenticated
+  // Redirect based on whether store is selected
   if (isAuthenticated) {
+    if (!selectedStore) {
+      return <Navigate to="/select-store" replace />;
+    }
     return <Navigate to="/dashboard" replace />;
   }
 

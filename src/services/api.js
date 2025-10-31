@@ -196,6 +196,19 @@ export const usersAPI = {
   getUserStats: async () => {
     return await apiRequest('/users/stats/overview');
   },
+
+  // Get selected store for current user
+  getSelectedStore: async () => {
+    return await apiRequest('/users/selected-store');
+  },
+
+  // Set selected store for current user
+  setSelectedStore: async (storeId) => {
+    return await apiRequest('/users/selected-store', {
+      method: 'PUT',
+      body: JSON.stringify({ storeId }),
+    });
+  },
 };
 
 // Categories API
