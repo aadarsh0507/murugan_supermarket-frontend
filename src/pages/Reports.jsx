@@ -25,7 +25,7 @@ import {
 import { MetricCard } from "@/components/MetricCard";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
 import { useToast } from "@/hooks/use-toast";
-import { billsAPI, usersAPI, purchaseOrdersAPI, suppliersAPI, itemsAPI } from "@/services/api";
+import { billsAPI, usersAPI, purchaseOrdersAPI, suppliersAPI, itemsAPI, categoriesAPI } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 const COLORS = ['hsl(239 70% 55%)', 'hsl(142 76% 45%)', 'hsl(38 92% 50%)', 'hsl(0 84% 60%)', 'hsl(263 70% 50%)'];
@@ -55,6 +55,8 @@ export default function Reports() {
   const [stockWithBatches, setStockWithBatches] = useState([]);
   const [stockSearch, setStockSearch] = useState("");
   const [stockLoading, setStockLoading] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState("all");
 
   const isAdmin = hasRole('admin');
   const isEmployee = hasRole('employee');
@@ -64,6 +66,7 @@ export default function Reports() {
   useEffect(() => {
     loadUsers();
     loadSuppliers();
+    loadCategories();
     loadReportData();
     // Load PO data immediately if we're on the purchase tab
     if (activeTab === "purchase") {
@@ -83,7 +86,7 @@ export default function Reports() {
         loadPOReportData();
       }
     }
-  }, [dateFrom, dateTo, selectedSupplierId, stockSearch, poReportType]);
+  }, [dateFrom, dateTo, selectedSupplierId, stockSearch, selectedCategoryId, poReportType]);
 
   const loadUsers = async () => {
     try {
@@ -103,6 +106,18 @@ export default function Reports() {
       setSuppliers(suppliersData);
     } catch (error) {
       console.error("Error loading suppliers:", error);
+    }
+  };
+
+  const loadCategories = async () => {
+    try {
+      const response = await categoriesAPI.getCategories({ 
+        includeSubcategories: true,
+        limit: 100 
+      });
+      setCategories(response.data?.categories || []);
+    } catch (error) {
+      console.error("Error loading categories:", error);
     }
   };
 
@@ -144,6 +159,9 @@ export default function Reports() {
       const params = {};
       if (stockSearch) {
         params.search = stockSearch;
+      }
+      if (selectedCategoryId && selectedCategoryId !== "all") {
+        params.categoryId = selectedCategoryId;
       }
 
       const response = await itemsAPI.getStockWithBatches(params);
@@ -505,6 +523,62 @@ export default function Reports() {
         </Button>
       </motion.div>
 
+      {/* Stock Report Filters */}
+      {activeTab === "purchase" && poReportType === "stock" && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                Stock Report Filters
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="stockCategory">Category</Label>
+                  <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+                    <SelectTrigger id="stockCategory">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category._id} value={category._id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Export</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        // TODO: Implement export for stock report
+                        toast({
+                          title: "Coming Soon",
+                          description: "Export functionality will be available soon",
+                        });
+                      }}
+                      className="flex-1"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Export
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
       {(activeTab === "sales" || (activeTab === "purchase" && poReportType !== "stock")) && (
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -518,7 +592,7 @@ export default function Reports() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`grid gap-4 ${activeTab === "sales" ? "md:grid-cols-4" : "md:grid-cols-4"}`}>
+            <div className={`grid gap-4 ${activeTab === "sales" ? "md:grid-cols-4" : "md:grid-cols-5"}`}>
               {activeTab === "sales" ? (
                 <>
               <div className="space-y-2">
@@ -1235,7 +1309,11 @@ export default function Reports() {
                             <TableCell>{stock.hsnNumber}</TableCell>
                             <TableCell>
                               {stock.expiryDate 
-                                ? new Date(stock.expiryDate).toLocaleDateString()
+                                ? new Date(stock.expiryDate).toLocaleDateString('en-GB', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric'
+                                  })
                                 : 'N/A'}
                             </TableCell>
                           </TableRow>

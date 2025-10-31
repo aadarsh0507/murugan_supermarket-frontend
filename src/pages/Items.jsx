@@ -17,7 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { itemsAPI, categoriesAPI, billsAPI } from "@/services/api";
+import { itemsAPI, categoriesAPI, billsAPI, barcodesAPI } from "@/services/api";
+import BarcodeLabel from "@/components/BarcodeLabel";
 import BillModal from "@/components/BillModal";
 
 export default function Items() {
@@ -47,6 +48,8 @@ export default function Items() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [barcodeInput, setBarcodeInput] = useState("");
+  const [lastScanned, setLastScanned] = useState(null); // { sku, name, time }
+  const [selectedBatch, setSelectedBatch] = useState(null); // Selected batch for barcode printing
 
   // Check if user is admin
   const isAdmin = hasRole('admin');
@@ -57,6 +60,19 @@ export default function Items() {
     loadLowStockItems();
     loadNoMovementItems();
   }, []);
+
+  // Auto-detect fast scanner input in the search box (supports numeric and alphanumeric SKUs)
+  useEffect(() => {
+    const trimmedValue = searchTerm.trim();
+    // Typical scans dump a burst of chars; accept 6+ safe SKU/barcode chars
+    if (trimmedValue.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedValue)) {
+      const timer = setTimeout(() => {
+        handleBarcodeScan(trimmedValue);
+        setSearchTerm("");
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [searchTerm]);
 
 
   const loadItems = async () => {
@@ -248,8 +264,10 @@ export default function Items() {
       expiryDate: item.expiryDate || ""
     });
     setItemImages(item.images || []);
+    setSelectedBatch(null); // Reset selected batch when opening edit modal
     console.log("Loading item for edit:", item);
     console.log("Item images:", item.images);
+    console.log("Item batches:", item.batches);
     setIsModalOpen(true);
   };
 
@@ -354,6 +372,21 @@ export default function Items() {
       return;
     }
 
+    // Ensure price is GREATER than cost price when cost is provided
+    if (
+      formData.cost !== "" &&
+      !isNaN(parseFloat(formData.cost)) &&
+      !isNaN(parseFloat(formData.price)) &&
+      parseFloat(formData.price) <= parseFloat(formData.cost)
+    ) {
+      toast({
+        title: "Validation Error",
+        description: "Price must be greater than cost price",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (formData.stock < 0) {
       toast({
         title: "Validation Error",
@@ -392,7 +425,7 @@ export default function Items() {
         expiryDate: formData.expiryDate === "" ? undefined : formData.expiryDate,
         // Ensure proper data types for required fields
         price: parseFloat(formData.price),
-        stock: parseInt(formData.stock),
+        stock: (formData.stock === "" || isNaN(parseInt(formData.stock))) ? undefined : parseInt(formData.stock),
         minStock: parseInt(formData.minStock)
       };
 
@@ -444,18 +477,40 @@ export default function Items() {
       console.error("Error saving item:", error);
       console.error("Form data being sent:", cleanedSubmitData);
       
-      // Handle validation errors specifically
-      let errorMessage = error.message || "Failed to save item";
-      if (error.message && error.message.includes("Validation failed")) {
-        // Try to extract specific validation errors from the response
-        if (error.response && error.response.data && error.response.data.errors) {
-          const validationErrors = error.response.data.errors;
-          console.error("Specific validation errors:", validationErrors);
-          errorMessage = `Validation failed: ${validationErrors.map(err => err.msg).join(', ')}`;
-        } else {
-          errorMessage = "Validation failed. Please check the console for detailed error information.";
-          console.error("Detailed validation error:", error);
+      // Extract a helpful backend error message to show why save failed
+      let errorMessage = "Failed to save item";
+      const status = error?.response?.status;
+      const statusText = error?.response?.statusText;
+      const data = error?.response?.data;
+
+      if (data) {
+        if (typeof data === 'string') {
+          errorMessage = data;
+        } else if (Array.isArray(data)) {
+          errorMessage = data.join(', ');
+        } else if (data.message) {
+          errorMessage = data.message;
+        } else if (data.error) {
+          errorMessage = typeof data.error === 'string'
+            ? data.error
+            : (data.error.message || JSON.stringify(data.error));
+        } else if (Array.isArray(data.errors)) {
+          // Express-validator or similar
+          errorMessage = data.errors
+            .map(err => err.msg || err.message || `${err.param || ''} ${err}`.trim())
+            .join(', ');
+        } else if (data.errors && typeof data.errors === 'object') {
+          // Mongoose validation error object: { errors: { field: { message } } }
+          errorMessage = Object.values(data.errors)
+            .map(err => err?.message || String(err))
+            .join(', ');
         }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+
+      if (status) {
+        errorMessage = `${status}${statusText ? ' ' + statusText : ''}: ${errorMessage}`;
       }
       
       toast({
@@ -593,7 +648,7 @@ export default function Items() {
       
       // Create display data for modal
       const displayData = {
-        storeName: "JAYA SUPER STORE",
+        storeName: "MURUGAN SUPER STORE",
         address: "No.25, Loop Road, Acharapakkam - 603301",
         phone: "Ph: 044-27522026",
         gstNumber: "GST No.: 33AWOPD0029J1ZS",
@@ -863,14 +918,15 @@ export default function Items() {
   };
 
   // Barcode scanning functions
-  const findItemByBarcode = (barcode) => {
-    if (!barcode || !barcode.trim()) return null;
-    
-    // Search through all loaded items for matching barcode
-    const foundItem = items.find(item => 
-      item.barcode && item.barcode.trim().toLowerCase() === barcode.trim().toLowerCase()
-    );
-    
+  const findItemByBarcode = (barcodeOrSku) => {
+    if (!barcodeOrSku || !barcodeOrSku.trim()) return null;
+    const normalized = barcodeOrSku.trim().toLowerCase();
+    // Match by item.barcode OR by item.sku so SKU-encoded labels work
+    const foundItem = items.find(item => {
+      const hasBarcode = item.barcode && item.barcode.trim().toLowerCase() === normalized;
+      const hasSku = item.sku && item.sku.trim().toLowerCase() === normalized;
+      return hasBarcode || hasSku;
+    });
     return foundItem || null;
   };
 
@@ -884,151 +940,101 @@ export default function Items() {
       return;
     }
 
-    const item = findItemByBarcode(scannedBarcode);
-    
-    if (!item) {
-      toast({
-        title: "Item Not Found",
-        description: `No item found with barcode: ${scannedBarcode}`,
-        variant: "destructive",
-      });
-      setBarcodeInput("");
-      return;
-    }
-
-    if (!item.isActive) {
-      toast({
-        title: "Item Unavailable",
-        description: `${item.name} is currently inactive`,
-        variant: "destructive",
-      });
-      setBarcodeInput("");
-      return;
-    }
-
-    if (item.stock <= 0) {
-      toast({
-        title: "Out of Stock",
-        description: `${item.name} is out of stock`,
-        variant: "destructive",
-      });
-      setBarcodeInput("");
-      return;
-    }
-
-    toast({
-      title: "Item Scanned",
-      description: `${item.name} has been added to cart`,
-    });
-
-    // Automatically proceed to payment and create bill
+    setIsScanning(true);
     try {
-      setSaving(true);
+      // First try to get item from barcode API (PO generated barcodes)
+      let itemData = null;
       
-      // Generate bill data
-      const billNumber = Math.floor(Math.random() * 1000) + 1;
-      const subtotal = item.price * 1;
-      const totalAmount = subtotal; // No discount for single scanned item
-      const totalQty = 1;
-      
-      // Calculate savings (assuming 10% discount on average)
-      const mrp = item.price * 1.1;
-      const totalSavings = mrp - item.price;
+      try {
+        const barcodeResponse = await barcodesAPI.getItemByBarcode(scannedBarcode.trim());
+        const barcodeResult = barcodeResponse.data;
+        itemData = {
+          ...barcodeResult.item,
+          _id: barcodeResult.item.sku, // Use SKU as ID for cart purposes
+          name: barcodeResult.item.name,
+          sku: barcodeResult.item.sku,
+          price: barcodeResult.item.price,
+        };
+      } catch (barcodeError) {
+        // If barcode API fails, try to find item in local items by barcode
+        const localItem = findItemByBarcode(scannedBarcode);
+        
+        if (!localItem) {
+          toast({
+            title: "Barcode Not Found",
+            description: `No item found with barcode: ${scannedBarcode}`,
+            variant: "destructive",
+          });
+          setBarcodeInput("");
+          return;
+        }
+        
+        itemData = localItem;
+      }
 
-      const billData = {
-        billNumber: billNumber.toString(),
-        counterNumber: 1,
-        customerName: "",
-        billBy: user?.fullName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Unknown',
-        items: [{
-          itemSku: item.sku,
-          itemName: item.name,
-          mrp: mrp,
-          saleRate: item.price,
-          quantity: 1,
-          netAmount: item.price
-        }],
-        subtotal: subtotal,
-        discountAmount: 0,
-        totalAmount: totalAmount,
-        totalQuantity: totalQty,
-        totalSavings: totalSavings,
-        amountPaid: totalAmount,
-        amountReturned: 0,
-        gstBreakdown: [
-          { basic: totalAmount * 0.6, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 },
-          { basic: totalAmount * 0.25, cgstPercent: 12.50, cgstAmount: totalAmount * 0.025, sgstPercent: 12.50, sgstAmount: totalAmount * 0.025 },
-          { basic: totalAmount * 0.15, cgstPercent: 12.00, cgstAmount: totalAmount * 0.018, sgstPercent: 12.00, sgstAmount: totalAmount * 0.018 },
-          { basic: 0.00, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 }
-        ],
-        paymentMethod: 'cash'
-      };
+      // Check if item is active (for local items)
+      if (itemData.hasOwnProperty('isActive') && !itemData.isActive) {
+        toast({
+          title: "Item Unavailable",
+          description: `${itemData.name} is currently inactive`,
+          variant: "destructive",
+        });
+        setBarcodeInput("");
+        return;
+      }
 
-      // Save bill to database
-      await billsAPI.createBill(billData);
+      // Check stock (for local items)
+      if (itemData.hasOwnProperty('stock') && itemData.stock <= 0) {
+        toast({
+          title: "Out of Stock",
+          description: `${itemData.name} is out of stock`,
+          variant: "destructive",
+        });
+        setBarcodeInput("");
+        return;
+      }
+
+      // Add item to cart with quantity 1 (default quantity as requested)
+      const existingItem = cart.find(cartItem => cartItem.sku === itemData.sku);
       
-      // Create display data for modal
-      const displayData = {
-        storeName: "JAYA SUPER STORE",
-        address: "No.25, Loop Road, Acharapakkam - 603301",
-        phone: "Ph: 044-27522026",
-        gstNumber: "GST No.: 33AWOPD0029J1ZS",
-        date: new Date().toLocaleDateString('en-GB', { 
-          day: '2-digit', 
-          month: 'short', 
-          year: 'numeric' 
-        }).replace(/ /g, '-'),
-        time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit' }),
-        billNumber: billNumber,
-        counterNumber: 1,
-        customerName: "",
-        billBy: user?.fullName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Unknown',
-        items: [{
-          name: item.name,
-          mrp: mrp.toFixed(2),
-          saleRate: item.price.toFixed(2),
-          qty: 1,
-          netAmount: item.price.toFixed(2)
-        }],
-        subtotal: subtotal.toFixed(2),
-        discountAmount: "0.00",
-        totalAmount: totalAmount.toFixed(2),
-        gstBreakdown: [
-          { basic: totalAmount * 0.6, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 },
-          { basic: totalAmount * 0.25, cgstPercent: 12.50, cgstAmount: totalAmount * 0.025, sgstPercent: 12.50, sgstAmount: totalAmount * 0.025 },
-          { basic: totalAmount * 0.15, cgstPercent: 12.00, cgstAmount: totalAmount * 0.018, sgstPercent: 12.00, sgstAmount: totalAmount * 0.018 },
-          { basic: 0.00, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 }
-        ]
-      };
-      
-      // Set bill data and show modal
-      setBillData(displayData);
-      setIsBillModalOpen(true);
-      setIsScanning(false);
-      setBarcodeInput("");
-      
-      // Clear cart after billing
-      setCart([]);
-      
-      // Reload items to reflect updated stock
-      await loadItems();
-      await loadLowStockItems();
-      await loadNoMovementItems();
-      
+      if (existingItem) {
+        // Item already in cart, increment quantity
+        setCart(cart.map(cartItem =>
+          cartItem.sku === itemData.sku
+            ? { ...cartItem, quantity: cartItem.quantity + 1 }
+            : cartItem
+        ));
+      } else {
+        // Item not in cart, add with quantity 1
+        setCart([...cart, { ...itemData, quantity: 1 }]);
+      }
+
+      // Persist last scanned data for on-screen display
+      setLastScanned({ sku: itemData.sku, name: itemData.name, time: new Date() });
+
       toast({
-        title: "Bill Created Successfully",
-        description: `Bill #${billNumber} has been created for ${item.name}`,
+        title: "Item Scanned",
+        description: `SKU: ${itemData.sku} • ${itemData.name} (qty: 1)`,
       });
+
+      // Reflect resolved SKU in inputs so users see SKU instead of raw numbers
+      setSearchTerm(itemData.sku || "");
+      setBarcodeInput(itemData.sku || "");
       
+      // Optionally open cart or billing modal
+      if (cart.length === 0) {
+        setIsCartOpen(true);
+      }
     } catch (error) {
-      console.error("Error creating bill from barcode scan:", error);
+      console.error("Error scanning barcode:", error);
       toast({
-        title: "Error Creating Bill",
-        description: error.message || "Failed to create bill",
-        variant: "destructive"
+        title: "Error",
+        description: error.response?.data?.message || "Failed to scan barcode",
+        variant: "destructive",
       });
+      setBarcodeInput("");
     } finally {
-      setSaving(false);
+      setIsScanning(false);
     }
   };
 
@@ -1272,6 +1278,12 @@ export default function Items() {
                 className="mt-2 text-sm md:text-base"
                 autoFocus
               />
+              {lastScanned && (
+                <div className="mt-2 text-xs md:text-sm text-green-900">
+                  Last scanned: <span className="font-semibold">SKU {lastScanned.sku}</span>{' '}
+                  <span className="text-muted-foreground">— {lastScanned.name}</span>
+                </div>
+              )}
             </div>
             <Button
               variant="outline"
@@ -1296,9 +1308,17 @@ export default function Items() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name, SKU, or description..."
+            placeholder="Search by name, SKU, or scan barcode..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => {
+              // Also handle Enter key for manual barcode entry
+              if (e.key === 'Enter' && searchTerm.trim().length >= 10 && /^\d+$/.test(searchTerm.trim())) {
+                e.preventDefault();
+                handleBarcodeScan(searchTerm.trim());
+                setSearchTerm("");
+              }
+            }}
             className="pl-9 text-sm md:text-base"
           />
         </div>
@@ -1505,7 +1525,6 @@ export default function Items() {
                 type="number"
                 value={formData.stock || ""}
                 onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) })}
-                required
               />
             </div>
           </div>
@@ -1703,6 +1722,155 @@ export default function Items() {
               />
             </div>
           </div>
+
+          {/* Barcode preview and reprint */}
+          {editingItem && (
+            <div className="mt-2 p-3 border rounded bg-white">
+              <div className="space-y-3">
+                {/* Batch Selection */}
+                {editingItem.batches && editingItem.batches.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Select Batch</Label>
+                    <Select
+                      value={selectedBatch !== null ? String(editingItem.batches.findIndex(b => b.batchNumber === selectedBatch.batchNumber)) : ""}
+                      onValueChange={(value) => {
+                        const index = parseInt(value);
+                        if (index >= 0 && index < editingItem.batches.length) {
+                          setSelectedBatch(editingItem.batches[index]);
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a batch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {editingItem.batches.map((batch, index) => (
+                          <SelectItem key={index} value={String(index)}>
+                            Batch: {batch.batchNumber} - Stock: {batch.quantity} {formData.unit || 'units'}
+                            {batch.expiryDate && ` - Exp: ${new Date(batch.expiryDate).toLocaleDateString('en-GB')}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedBatch && (
+                      <p className="text-xs text-muted-foreground">
+                        Selected: Batch {selectedBatch.batchNumber} - {selectedBatch.quantity} {formData.unit || 'units'} available
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between mb-2">
+                  <Label>Barcode Label Preview</Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      // If batches exist, require batch selection
+                      if ((editingItem.batches && editingItem.batches.length > 0) && !selectedBatch) {
+                        toast({
+                          title: "No Batch Selected",
+                          description: "Please select a batch to print labels",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+
+                      const imgData = window.__lastItemLabelDataUrl;
+                      if (!imgData) {
+                        toast({
+                          title: "Barcode Not Ready",
+                          description: "Please wait for barcode to load",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+
+                      const storeName = 'Murugan Stores';
+                      const itemName = formData.name || '';
+                      const batchNumber = selectedBatch ? selectedBatch.batchNumber : (formData.batchNumber || '-');
+                      const price = Number(formData.price || 0).toFixed(2);
+                      const expiry = selectedBatch && selectedBatch.expiryDate 
+                        ? new Date(selectedBatch.expiryDate).toLocaleDateString('en-GB')
+                        : (formData.expiryDate ? new Date(formData.expiryDate).toLocaleDateString('en-GB') : 'N/A');
+                      
+                      // Get quantity to print - use batch quantity if batch is selected, otherwise print 1
+                      const quantityToPrint = selectedBatch ? selectedBatch.quantity : 1;
+
+                      const printWin = window.open('', '_blank', 'width=380,height=600');
+                      let labelsHTML = '';
+                      
+                      // Generate labels based on batch stock count
+                      for (let i = 0; i < quantityToPrint; i++) {
+                        labelsHTML += `
+                          <div class="label" style="page-break-after: always; margin-bottom: 2mm;">
+                            <div class="header">${storeName}</div>
+                            <div class="barcode">${imgData ? `<img src="${imgData}" />` : ''}</div>
+                            <div class="footer">
+                              <div class="name">${itemName}</div>
+                              <div>Batch: ${batchNumber || '-'}</div>
+                              <div class="row">
+                                <span>Exp: ${expiry}</span>
+                                <span>Price: ₹${price}</span>
+                              </div>
+                            </div>
+                          </div>
+                        `;
+                      }
+
+                      printWin.document.write(`
+                        <html>
+                          <head>
+                            <title>Print Barcode Labels</title>
+                            <style>
+                              @page { size: 80mm 55mm; margin: 0; }
+                              html, body { height: 100%; }
+                              body{ margin:0; padding:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+                              .label { width: 80mm; min-height: 45mm; padding: 3mm; border: 0.6mm solid #1f2937; box-sizing: border-box; }
+                              .header { text-align:center; font-weight:700; font-size: 14px; border-bottom: 0.6mm solid #1f2937; padding-bottom: 1mm; margin-bottom: 1mm; }
+                              .barcode { display:flex; justify-content:center; align-items:center; min-height: 20mm; margin: 2mm 0; }
+                              .footer { border-top: 0.6mm solid #1f2937; padding-top: 1mm; margin-top: 1mm; font-size: 10px; }
+                              .row { display:flex; justify-content:space-between; font-size:10px; }
+                              img { max-width:100%; height:auto; }
+                              .name { font-weight:600; font-size:11px; margin-bottom:1mm; }
+                            </style>
+                          </head>
+                          <body>
+                            ${labelsHTML}
+                            <script>setTimeout(()=>{window.print();window.close();},300);</script>
+                          </body>
+                        </html>
+                      `);
+                      printWin.document.close();
+
+                      toast({
+                        title: "Printing Labels",
+                        description: selectedBatch 
+                          ? `Printing ${quantityToPrint} label(s) for Batch ${batchNumber}`
+                          : `Printing 1 label`,
+                      });
+                    }}
+                    disabled={editingItem.batches && editingItem.batches.length > 0 && !selectedBatch}
+                  >
+                    <Printer className="h-4 w-4 mr-2" />
+                    Print Label{selectedBatch && selectedBatch.quantity > 1 ? `s (${selectedBatch.quantity})` : ''}
+                  </Button>
+                </div>
+                <BarcodeLabel
+                  sku={formData.sku}
+                  barcode={formData.barcode}
+                  storeName={"Murugan Stores"}
+                  itemName={formData.name}
+                  amount={formData.price}
+                  batchNumber={selectedBatch ? selectedBatch.batchNumber : (formData.batchNumber || '')}
+                  expiryDate={selectedBatch && selectedBatch.expiryDate ? selectedBatch.expiryDate : formData.expiryDate}
+                  onCanvasReady={(canvas) => {
+                    try { window.__lastItemLabelDataUrl = canvas.toDataURL('image/png'); } catch {}
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           </div>
           

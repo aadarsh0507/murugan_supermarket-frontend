@@ -22,6 +22,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { purchaseOrdersAPI, suppliersAPI, categoriesAPI } from "@/services/api";
+import BarcodeLabel from "@/components/BarcodeLabel";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { CalendarIcon } from "lucide-react";
+import { format } from "date-fns";
 
 const PurchaseOrders = () => {
   const { toast } = useToast();
@@ -36,6 +42,9 @@ const PurchaseOrders = () => {
   const [openSuggestIndex, setOpenSuggestIndex] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const inputRefs = useRef({});
+  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const [barcodeData, setBarcodeData] = useState(null);
+  const [currentPOId, setCurrentPOId] = useState(null);
 
   const [formData, setFormData] = useState({
     supplier: "",
@@ -335,6 +344,30 @@ const PurchaseOrders = () => {
         return;
       }
 
+      // Validate: batch number must be unique per same item (allow same batch across different items)
+      const seenByItem = new Map(); // key: item identity -> Set(batchNumber)
+      for (let i = 0; i < validItems.length; i++) {
+        const it = validItems[i];
+        const itemIdentity = (it.sku && it.sku.trim() !== "") ? `sku:${it.sku.trim()}` : `name:${(it.particulars || '').trim().toLowerCase()}`;
+        const batch = (it.batchNumber || '').trim();
+        if (batch !== "") {
+          if (!seenByItem.has(itemIdentity)) {
+            seenByItem.set(itemIdentity, new Set());
+          }
+          const batches = seenByItem.get(itemIdentity);
+          if (batches.has(batch)) {
+            toast({
+              title: "Duplicate Batch Number",
+              description: `Batch '${batch}' is repeated for the same item (${it.particulars || it.sku}). Each item's batches must be unique.`,
+              variant: "destructive",
+            });
+            setSaving(false);
+            return;
+          }
+          batches.add(batch);
+        }
+      }
+
       const poData = {
         supplier: formData.supplier,
         store: formData.store,
@@ -367,12 +400,24 @@ const PurchaseOrders = () => {
         ...(formData.remarks && formData.remarks.trim() !== "" && { notes: formData.remarks })
       };
 
+      let createdPO = null;
       if (editingPO) {
-        await purchaseOrdersAPI.updatePurchaseOrder(editingPO._id, poData);
+        createdPO = await purchaseOrdersAPI.updatePurchaseOrder(editingPO._id, poData);
         toast({ title: "Success", description: "PO updated" });
       } else {
-        await purchaseOrdersAPI.createPurchaseOrder(poData);
-        toast({ title: "Success", description: "PO created" });
+        const response = await purchaseOrdersAPI.createPurchaseOrder(poData);
+        createdPO = response.data;
+        toast({ title: "Success", description: "PO created and barcodes generated" });
+        
+        // Fetch barcodes for the created PO
+        try {
+          const barcodesResponse = await purchaseOrdersAPI.getPurchaseOrderBarcodes(createdPO._id);
+          setBarcodeData(barcodesResponse.data);
+          setCurrentPOId(createdPO._id);
+          setShowBarcodeModal(true);
+        } catch (error) {
+          console.error("Error fetching barcodes:", error);
+        }
       }
       
       // Reset form
@@ -734,13 +779,37 @@ const PurchaseOrders = () => {
                         />
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="date"
-                          value={item.expiryDate || ''}
-                          onChange={(e) => updateItem(index, 'expiryDate', e.target.value)}
-                          placeholder="Expiry Date"
-                          className="w-32"
-                        />
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={`w-32 justify-start text-left font-normal ${
+                                !item.expiryDate && "text-muted-foreground"
+                              }`}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {item.expiryDate ? (
+                                format(new Date(item.expiryDate), "dd-MM-yyyy")
+                              ) : (
+                                <span>dd-mm-yyyy</span>
+                              )}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0 max-h-none" align="start" sideOffset={4} collisionPadding={10}>
+                            <Calendar
+                              mode="single"
+                              selected={item.expiryDate ? new Date(item.expiryDate) : undefined}
+                              onSelect={(date) => {
+                                if (date) {
+                                  updateItem(index, 'expiryDate', format(date, "yyyy-MM-dd"));
+                                } else {
+                                  updateItem(index, 'expiryDate', '');
+                                }
+                              }}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
                       </TableCell>
                       <TableCell>
                         <Select 
@@ -811,6 +880,78 @@ const PurchaseOrders = () => {
           </CardContent>
         </Card>
       </form>
+
+      {/* Barcode Labels Modal */}
+      <Dialog open={showBarcodeModal} onOpenChange={setShowBarcodeModal}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Barcode Labels - {barcodeData?.purchaseOrderNumber}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6 mt-4">
+            {barcodeData?.groupedBarcodes?.map((group, groupIndex) => (
+              <div key={groupIndex} className="space-y-3">
+                <div className="font-semibold text-lg border-b pb-2">
+                  {group.itemName} (SKU: {group.itemSku}) - {group.barcodes.length} labels
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  {group.barcodes.map((barcodeItem, idx) => (
+                    <div key={idx} className="border rounded p-2">
+                      <BarcodeLabel
+                        // Encode SKU so scanners return SKU text
+                        sku={group.itemSku}
+                        barcode={barcodeItem.barcode}
+                        storeName={group.storeName}
+                        itemName={group.itemName}
+                        expiryDate={group.expiryDate}
+                        amount={group.amount}
+                        batchNumber={group.batchNumber}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between items-center mt-4 pt-4 border-t">
+            {currentPOId && (
+              <Button 
+                variant="destructive"
+                onClick={async () => {
+                  try {
+                    await purchaseOrdersAPI.regeneratePurchaseOrderBarcodes(currentPOId);
+                    const barcodesResponse = await purchaseOrdersAPI.getPurchaseOrderBarcodes(currentPOId);
+                    setBarcodeData(barcodesResponse.data);
+                    toast({
+                      title: "Success",
+                      description: "Barcodes regenerated successfully"
+                    });
+                  } catch (error) {
+                    toast({
+                      title: "Error",
+                      description: error.response?.data?.message || "Failed to regenerate barcodes",
+                      variant: "destructive"
+                    });
+                  }
+                }}
+              >
+                Regenerate Barcodes
+              </Button>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowBarcodeModal(false)}>
+                Close
+              </Button>
+              <Button 
+                onClick={() => {
+                  window.print();
+                }}
+              >
+                Print Labels
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -513,6 +513,26 @@ export const purchaseOrdersAPI = {
       body: JSON.stringify({ receivedItems }),
     });
   },
+
+  // Get barcodes for a purchase order
+  getPurchaseOrderBarcodes: async (poId) => {
+    return await apiRequest(`/purchase-orders/${poId}/barcodes`);
+  },
+
+  // Regenerate barcodes for a purchase order
+  regeneratePurchaseOrderBarcodes: async (poId) => {
+    return await apiRequest(`/purchase-orders/${poId}/regenerate-barcodes`, {
+      method: 'POST',
+    });
+  },
+};
+
+// Barcodes API
+export const barcodesAPI = {
+  // Get item by barcode
+  getItemByBarcode: async (barcode) => {
+    return await apiRequest(`/barcodes/${barcode}`);
+  },
 };
 
 // Health check
