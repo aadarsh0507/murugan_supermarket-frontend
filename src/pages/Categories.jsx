@@ -348,14 +348,38 @@ const Categories = () => {
       return;
     }
 
+    // Additional numeric validations
+    const priceNum = parseFloat(multiStepData.item.price);
+    const costNum = multiStepData.item.cost === "" || multiStepData.item.cost === null || typeof multiStepData.item.cost === 'undefined'
+      ? undefined
+      : parseFloat(multiStepData.item.cost);
+
+    if (isNaN(priceNum) || priceNum <= 0) {
+      toast({
+        title: "Validation Error",
+        description: "Price must be a number greater than 0",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (typeof costNum !== 'undefined' && !isNaN(costNum) && priceNum <= costNum) {
+      toast({
+        title: "Validation Error",
+        description: "Price must be greater than cost price",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       const itemData = {
         name: multiStepData.item.name.trim(),
         sku: multiStepData.item.sku.trim(),
         description: multiStepData.item.description.trim(),
-        price: parseFloat(multiStepData.item.price),
-        cost: multiStepData.item.cost ? parseFloat(multiStepData.item.cost) : null,
+        price: priceNum,
+        cost: typeof costNum === 'undefined' ? null : costNum,
         stock: parseInt(multiStepData.item.stock) || 0,
         minStock: parseInt(multiStepData.item.minStock) || 0,
         maxStock: multiStepData.item.maxStock ? parseInt(multiStepData.item.maxStock) : null,

@@ -328,6 +328,13 @@ export const itemsAPI = {
     return await apiRequest(`/items/subcategory/${subcategoryId}`);
   },
 
+  // Get stock with batches
+  getStockWithBatches: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/items/stock-with-batches?${queryString}` : '/items/stock-with-batches';
+    return await apiRequest(endpoint);
+  },
+
   // Get item statistics
   getItemStats: async () => {
     return await apiRequest('/items/stats/overview');
@@ -505,6 +512,26 @@ export const purchaseOrdersAPI = {
       method: 'PATCH',
       body: JSON.stringify({ receivedItems }),
     });
+  },
+
+  // Get barcodes for a purchase order
+  getPurchaseOrderBarcodes: async (poId) => {
+    return await apiRequest(`/purchase-orders/${poId}/barcodes`);
+  },
+
+  // Regenerate barcodes for a purchase order
+  regeneratePurchaseOrderBarcodes: async (poId) => {
+    return await apiRequest(`/purchase-orders/${poId}/regenerate-barcodes`, {
+      method: 'POST',
+    });
+  },
+};
+
+// Barcodes API
+export const barcodesAPI = {
+  // Get item by barcode
+  getItemByBarcode: async (barcode) => {
+    return await apiRequest(`/barcodes/${barcode}`);
   },
 };
 

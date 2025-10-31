@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Package, Filter, ShoppingCart, Minus, X, FolderTree, CreditCard, Banknote, QrCode, Printer, Upload, Image as ImageIcon } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Package, Filter, ShoppingCart, Minus, X, FolderTree, CreditCard, Banknote, QrCode, Printer, Upload, Image as ImageIcon, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,7 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { itemsAPI, categoriesAPI, billsAPI } from "@/services/api";
+import { itemsAPI, categoriesAPI, billsAPI, barcodesAPI } from "@/services/api";
+import BarcodeLabel from "@/components/BarcodeLabel";
 import BillModal from "@/components/BillModal";
 
 export default function Items() {
@@ -29,6 +30,7 @@ export default function Items() {
   const [subcategories, setSubcategories] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedStatus, setSelectedStatus] = useState("all"); // New status filter
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [formData, setFormData] = useState({});
@@ -44,6 +46,10 @@ export default function Items() {
   const [discountAmount, setDiscountAmount] = useState(0);
   const [itemImages, setItemImages] = useState([]);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [barcodeInput, setBarcodeInput] = useState("");
+  const [lastScanned, setLastScanned] = useState(null); // { sku, name, time }
+  const [selectedBatch, setSelectedBatch] = useState(null); // Selected batch for barcode printing
 
   // Check if user is admin
   const isAdmin = hasRole('admin');
@@ -54,6 +60,19 @@ export default function Items() {
     loadLowStockItems();
     loadNoMovementItems();
   }, []);
+
+  // Auto-detect fast scanner input in the search box (supports numeric and alphanumeric SKUs)
+  useEffect(() => {
+    const trimmedValue = searchTerm.trim();
+    // Typical scans dump a burst of chars; accept 6+ safe SKU/barcode chars
+    if (trimmedValue.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedValue)) {
+      const timer = setTimeout(() => {
+        handleBarcodeScan(trimmedValue);
+        setSearchTerm("");
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [searchTerm]);
 
 
   const loadItems = async () => {
@@ -179,19 +198,34 @@ export default function Items() {
     return acc;
   }, {});
 
-  // Filter items based on search and category selection
+  // Filter items based on search, category selection, and status
   const filteredItems = items.filter((item) => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase()));
     
     // Check if item belongs to selected category
-    // In the embedded structure, items have subcategory with parentCategory info
     const itemCategoryId = item.subcategory?.parentCategory?._id;
     const matchesCategory = selectedCategory === "all" || 
                            itemCategoryId === selectedCategory;
     
-    return matchesSearch && matchesCategory;
+    // Check if item matches selected status
+    // For non-admin users, only show active items regardless of filter
+    // For admin users, respect the status filter
+    let matchesStatus = true;
+    if (isAdmin) {
+      if (selectedStatus === "active") {
+        matchesStatus = item.isActive === true;
+      } else if (selectedStatus === "inactive") {
+        matchesStatus = item.isActive === false;
+      }
+      // "all" shows everything
+    } else {
+      // Non-admin users only see active items
+      matchesStatus = item.isActive === true;
+    }
+    
+    return matchesSearch && matchesCategory && matchesStatus;
   });
 
   const handleAddNew = () => {
@@ -230,8 +264,10 @@ export default function Items() {
       expiryDate: item.expiryDate || ""
     });
     setItemImages(item.images || []);
+    setSelectedBatch(null); // Reset selected batch when opening edit modal
     console.log("Loading item for edit:", item);
     console.log("Item images:", item.images);
+    console.log("Item batches:", item.batches);
     setIsModalOpen(true);
   };
 
@@ -336,6 +372,21 @@ export default function Items() {
       return;
     }
 
+    // Ensure price is GREATER than cost price when cost is provided
+    if (
+      formData.cost !== "" &&
+      !isNaN(parseFloat(formData.cost)) &&
+      !isNaN(parseFloat(formData.price)) &&
+      parseFloat(formData.price) <= parseFloat(formData.cost)
+    ) {
+      toast({
+        title: "Validation Error",
+        description: "Price must be greater than cost price",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (formData.stock < 0) {
       toast({
         title: "Validation Error",
@@ -374,7 +425,7 @@ export default function Items() {
         expiryDate: formData.expiryDate === "" ? undefined : formData.expiryDate,
         // Ensure proper data types for required fields
         price: parseFloat(formData.price),
-        stock: parseInt(formData.stock),
+        stock: (formData.stock === "" || isNaN(parseInt(formData.stock))) ? undefined : parseInt(formData.stock),
         minStock: parseInt(formData.minStock)
       };
 
@@ -426,18 +477,40 @@ export default function Items() {
       console.error("Error saving item:", error);
       console.error("Form data being sent:", cleanedSubmitData);
       
-      // Handle validation errors specifically
-      let errorMessage = error.message || "Failed to save item";
-      if (error.message && error.message.includes("Validation failed")) {
-        // Try to extract specific validation errors from the response
-        if (error.response && error.response.data && error.response.data.errors) {
-          const validationErrors = error.response.data.errors;
-          console.error("Specific validation errors:", validationErrors);
-          errorMessage = `Validation failed: ${validationErrors.map(err => err.msg).join(', ')}`;
-        } else {
-          errorMessage = "Validation failed. Please check the console for detailed error information.";
-          console.error("Detailed validation error:", error);
+      // Extract a helpful backend error message to show why save failed
+      let errorMessage = "Failed to save item";
+      const status = error?.response?.status;
+      const statusText = error?.response?.statusText;
+      const data = error?.response?.data;
+
+      if (data) {
+        if (typeof data === 'string') {
+          errorMessage = data;
+        } else if (Array.isArray(data)) {
+          errorMessage = data.join(', ');
+        } else if (data.message) {
+          errorMessage = data.message;
+        } else if (data.error) {
+          errorMessage = typeof data.error === 'string'
+            ? data.error
+            : (data.error.message || JSON.stringify(data.error));
+        } else if (Array.isArray(data.errors)) {
+          // Express-validator or similar
+          errorMessage = data.errors
+            .map(err => err.msg || err.message || `${err.param || ''} ${err}`.trim())
+            .join(', ');
+        } else if (data.errors && typeof data.errors === 'object') {
+          // Mongoose validation error object: { errors: { field: { message } } }
+          errorMessage = Object.values(data.errors)
+            .map(err => err?.message || String(err))
+            .join(', ');
         }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+
+      if (status) {
+        errorMessage = `${status}${statusText ? ' ' + statusText : ''}: ${errorMessage}`;
       }
       
       toast({
@@ -575,7 +648,7 @@ export default function Items() {
       
       // Create display data for modal
       const displayData = {
-        storeName: "JAYA SUPER STORE",
+        storeName: "MURUGAN SUPER STORE",
         address: "No.25, Loop Road, Acharapakkam - 603301",
         phone: "Ph: 044-27522026",
         gstNumber: "GST No.: 33AWOPD0029J1ZS",
@@ -844,6 +917,147 @@ export default function Items() {
     qrWindow.document.close();
   };
 
+  // Barcode scanning functions
+  const findItemByBarcode = (barcodeOrSku) => {
+    if (!barcodeOrSku || !barcodeOrSku.trim()) return null;
+    const normalized = barcodeOrSku.trim().toLowerCase();
+    // Match by item.barcode OR by item.sku so SKU-encoded labels work
+    const foundItem = items.find(item => {
+      const hasBarcode = item.barcode && item.barcode.trim().toLowerCase() === normalized;
+      const hasSku = item.sku && item.sku.trim().toLowerCase() === normalized;
+      return hasBarcode || hasSku;
+    });
+    return foundItem || null;
+  };
+
+  const handleBarcodeScan = async (scannedBarcode) => {
+    if (!scannedBarcode || !scannedBarcode.trim()) {
+      toast({
+        title: "Invalid Barcode",
+        description: "Please scan a valid barcode",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsScanning(true);
+    try {
+      // First try to get item from barcode API (PO generated barcodes)
+      let itemData = null;
+      
+      try {
+        const barcodeResponse = await barcodesAPI.getItemByBarcode(scannedBarcode.trim());
+        const barcodeResult = barcodeResponse.data;
+        itemData = {
+          ...barcodeResult.item,
+          _id: barcodeResult.item.sku, // Use SKU as ID for cart purposes
+          name: barcodeResult.item.name,
+          sku: barcodeResult.item.sku,
+          price: barcodeResult.item.price,
+        };
+      } catch (barcodeError) {
+        // If barcode API fails, try to find item in local items by barcode
+        const localItem = findItemByBarcode(scannedBarcode);
+        
+        if (!localItem) {
+          toast({
+            title: "Barcode Not Found",
+            description: `No item found with barcode: ${scannedBarcode}`,
+            variant: "destructive",
+          });
+          setBarcodeInput("");
+          return;
+        }
+        
+        itemData = localItem;
+      }
+
+      // Check if item is active (for local items)
+      if (itemData.hasOwnProperty('isActive') && !itemData.isActive) {
+        toast({
+          title: "Item Unavailable",
+          description: `${itemData.name} is currently inactive`,
+          variant: "destructive",
+        });
+        setBarcodeInput("");
+        return;
+      }
+
+      // Check stock (for local items)
+      if (itemData.hasOwnProperty('stock') && itemData.stock <= 0) {
+        toast({
+          title: "Out of Stock",
+          description: `${itemData.name} is out of stock`,
+          variant: "destructive",
+        });
+        setBarcodeInput("");
+        return;
+      }
+
+      // Add item to cart with quantity 1 (default quantity as requested)
+      const existingItem = cart.find(cartItem => cartItem.sku === itemData.sku);
+      
+      if (existingItem) {
+        // Item already in cart, increment quantity
+        setCart(cart.map(cartItem =>
+          cartItem.sku === itemData.sku
+            ? { ...cartItem, quantity: cartItem.quantity + 1 }
+            : cartItem
+        ));
+      } else {
+        // Item not in cart, add with quantity 1
+        setCart([...cart, { ...itemData, quantity: 1 }]);
+      }
+
+      // Persist last scanned data for on-screen display
+      setLastScanned({ sku: itemData.sku, name: itemData.name, time: new Date() });
+
+      toast({
+        title: "Item Scanned",
+        description: `SKU: ${itemData.sku} • ${itemData.name} (qty: 1)`,
+      });
+
+      // Reflect resolved SKU in inputs so users see SKU instead of raw numbers
+      setSearchTerm(itemData.sku || "");
+      setBarcodeInput(itemData.sku || "");
+      
+      // Optionally open cart or billing modal
+      if (cart.length === 0) {
+        setIsCartOpen(true);
+      }
+    } catch (error) {
+      console.error("Error scanning barcode:", error);
+      toast({
+        title: "Error",
+        description: error.response?.data?.message || "Failed to scan barcode",
+        variant: "destructive",
+      });
+      setBarcodeInput("");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleScanButtonClick = () => {
+    setIsScanning(true);
+    setBarcodeInput("");
+    // Focus the barcode input when scanning mode is enabled
+    setTimeout(() => {
+      const barcodeInputElement = document.getElementById('barcode-scan-input');
+      if (barcodeInputElement) {
+        barcodeInputElement.focus();
+      }
+    }, 100);
+  };
+
+  const handleBarcodeInputKeyDown = (e) => {
+    // Most barcode scanners send Enter key after scanning
+    if (e.key === 'Enter' && barcodeInput.trim()) {
+      e.preventDefault();
+      handleBarcodeScan(barcodeInput);
+    }
+  };
+
   const ItemCard = ({ item }) => {
     const subcategoryName = item.subcategory?.name || "Unknown";
     const subcategoryColor = `bg-blue-100 text-blue-800`; // Default color
@@ -854,12 +1068,17 @@ export default function Items() {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.2 }}
       >
-        <Card className={`hover:shadow-lg transition-shadow duration-200 ${getItemColor(item)}`}>
+        <Card className={`hover:shadow-lg transition-shadow duration-200 ${getItemColor(item)} ${!item.isActive ? 'opacity-60 border-dashed' : ''}`}>
           <CardHeader className="pb-2 md:pb-3">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <CardTitle className="text-sm md:text-lg truncate">{item.name}</CardTitle>
                 <p className="text-xs md:text-sm text-muted-foreground truncate">{item.sku}</p>
+                {!item.isActive && (
+                  <Badge variant="secondary" className="mt-1 bg-gray-100 text-gray-600 text-xs">
+                    Inactive
+                  </Badge>
+                )}
               </div>
               <Badge className={`${subcategoryColor} text-xs shrink-0`}>
                 {subcategoryName}
@@ -872,9 +1091,26 @@ export default function Items() {
                 (() => {
                   const primaryImage = item.images.find(img => img.isPrimary);
                   const imageToShow = primaryImage || item.images[0];
-                  const imageUrl = imageToShow.url.startsWith('http') 
-                    ? imageToShow.url
-                    : `/api/items/image/${imageToShow.url.split('/').pop()}`; // Extract filename and use API endpoint
+                  
+                  // Construct proper image URL
+                  let imageUrl = imageToShow.url;
+                  
+                  // If it's a base64 data URL, use it directly
+                  if (imageToShow.url.startsWith('data:image')) {
+                    imageUrl = imageToShow.url;
+                  }
+                  // If it's an external URL (http/https), use it directly
+                  else if (imageToShow.url.startsWith('http://') || imageToShow.url.startsWith('https://')) {
+                    imageUrl = imageToShow.url;
+                  }
+                  // If it's a relative path like /uploads/items/filename.ext, use it directly (proxied in development)
+                  else if (imageToShow.url.startsWith('/uploads/')) {
+                    imageUrl = imageToShow.url;
+                  }
+                  // If it's just a filename, prepend the uploads path
+                  else {
+                    imageUrl = `/uploads/items/${imageToShow.url}`;
+                  }
                   
                   console.log('ItemCard - Displaying image for item:', item.name);
                   console.log('ItemCard - Image URL:', imageUrl);
@@ -933,11 +1169,12 @@ export default function Items() {
                 variant="default"
                 size="sm"
                 onClick={() => addToCart(item)}
-                className="flex-1 bg-gradient-primary text-xs md:text-sm"
+                disabled={!item.isActive}
+                className={`flex-1 text-xs md:text-sm ${!item.isActive ? 'opacity-50 cursor-not-allowed' : 'bg-gradient-primary'}`}
               >
                 <ShoppingCart className="h-3 w-3 md:h-4 md:w-4 mr-1" />
-                <span className="hidden sm:inline">Add to Cart</span>
-                <span className="sm:hidden">Add</span>
+                <span className="hidden sm:inline">{!item.isActive ? 'Unavailable' : 'Add to Cart'}</span>
+                <span className="sm:hidden">{!item.isActive ? 'N/A' : 'Add'}</span>
               </Button>
               <Button
                 variant="outline"
@@ -987,6 +1224,16 @@ export default function Items() {
             <span className="hidden sm:inline">Categories</span>
           </Button>
           <Button
+            variant={isScanning ? "default" : "outline"}
+            onClick={handleScanButtonClick}
+            className={`flex items-center justify-center gap-2 text-sm md:text-base ${isScanning ? 'bg-green-600 hover:bg-green-700' : ''}`}
+            size="sm"
+          >
+            <ScanLine className="h-4 w-4" />
+            <span className="hidden sm:inline">{isScanning ? 'Scanning...' : 'Scan Barcode'}</span>
+            <span className="sm:hidden">{isScanning ? 'Scanning' : 'Scan'}</span>
+          </Button>
+          <Button
             variant="outline"
             onClick={() => setIsCartOpen(true)}
             className="relative flex items-center justify-center gap-2 text-sm md:text-base"
@@ -1008,6 +1255,50 @@ export default function Items() {
         </div>
       </div>
 
+      {/* Barcode Scan Input - Shown when scanning mode is active */}
+      {isScanning && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          className="bg-green-50 border-2 border-green-500 rounded-lg p-4"
+        >
+          <div className="flex items-center gap-3">
+            <ScanLine className="h-5 w-5 text-green-600 animate-pulse" />
+            <div className="flex-1">
+              <Label htmlFor="barcode-scan-input" className="text-sm font-semibold text-green-800">
+                Ready to scan barcode...
+              </Label>
+              <Input
+                id="barcode-scan-input"
+                placeholder="Scan barcode or type barcode here..."
+                value={barcodeInput}
+                onChange={(e) => setBarcodeInput(e.target.value)}
+                onKeyDown={handleBarcodeInputKeyDown}
+                className="mt-2 text-sm md:text-base"
+                autoFocus
+              />
+              {lastScanned && (
+                <div className="mt-2 text-xs md:text-sm text-green-900">
+                  Last scanned: <span className="font-semibold">SKU {lastScanned.sku}</span>{' '}
+                  <span className="text-muted-foreground">— {lastScanned.name}</span>
+                </div>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsScanning(false);
+                setBarcodeInput("");
+              }}
+              size="sm"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </motion.div>
+      )}
+
       {/* Filters and Search */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -1017,9 +1308,17 @@ export default function Items() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name, SKU, or description..."
+            placeholder="Search by name, SKU, or scan barcode..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => {
+              // Also handle Enter key for manual barcode entry
+              if (e.key === 'Enter' && searchTerm.trim().length >= 10 && /^\d+$/.test(searchTerm.trim())) {
+                e.preventDefault();
+                handleBarcodeScan(searchTerm.trim());
+                setSearchTerm("");
+              }
+            }}
             className="pl-9 text-sm md:text-base"
           />
         </div>
@@ -1039,6 +1338,20 @@ export default function Items() {
           </SelectContent>
         </Select>
         
+        {/* Status Filter - Only show for admin users */}
+        {isAdmin && (
+          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+            <SelectTrigger className="w-full sm:w-48">
+              <Filter className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="All Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="active">Active Only</SelectItem>
+              <SelectItem value="inactive">Inactive Only</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
 
       </motion.div>
 
@@ -1063,13 +1376,28 @@ export default function Items() {
               >
                 All Categories
                 <Badge variant="secondary">
-                  {items.length}
+                  {filteredItems.length}
                 </Badge>
               </Button>
               {categories.map((category) => {
                 const categoryItems = items.filter(item => {
                   const itemCategoryId = item.subcategory?.parentCategory?._id;
                   return itemCategoryId === category._id;
+                });
+                
+                // Apply status filter to category items count
+                const filteredCategoryItems = categoryItems.filter(item => {
+                  let matchesStatus = true;
+                  if (isAdmin) {
+                    if (selectedStatus === "active") {
+                      matchesStatus = item.isActive === true;
+                    } else if (selectedStatus === "inactive") {
+                      matchesStatus = item.isActive === false;
+                    }
+                  } else {
+                    matchesStatus = item.isActive === true;
+                  }
+                  return matchesStatus;
                 });
                 
                 return (
@@ -1081,7 +1409,7 @@ export default function Items() {
                   >
                     {category.name}
                     <Badge variant="secondary">
-                      {categoryItems.length}
+                      {filteredCategoryItems.length}
                     </Badge>
                   </Button>
                 );
@@ -1106,6 +1434,8 @@ export default function Items() {
                 ? "Try adjusting your search terms" 
                 : selectedCategory !== "all"
                 ? `No items found in ${categories.find(cat => cat._id === selectedCategory)?.name || 'selected'} category`
+                : selectedStatus !== "all" && isAdmin
+                ? `No ${selectedStatus} items available`
                 : "No items available"}
             </p>
           </div>
@@ -1195,7 +1525,6 @@ export default function Items() {
                 type="number"
                 value={formData.stock || ""}
                 onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) })}
-                required
               />
             </div>
           </div>
@@ -1297,7 +1626,7 @@ export default function Items() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Upload multiple images. The first image will be set as primary.
+                Upload multiple images (JPG, PNG, GIF, WEBP, SVG, BMP, TIFF). The first image will be set as primary.
               </p>
             </div>
 
@@ -1310,11 +1639,24 @@ export default function Items() {
                     <div key={index} className="relative group">
                       <div className="aspect-square rounded-lg overflow-hidden border-2 border-gray-200">
                         <img
-                          src={
-                            image.url.startsWith('http') 
-                              ? image.url
-                              : `/api/items/image/${image.url.split('/').pop()}` // Extract filename and use API endpoint
-                          }
+                          src={(() => {
+                            // If it's a base64 data URL, use it directly
+                            if (image.url.startsWith('data:image')) {
+                              return image.url;
+                            }
+                            // If it's an external URL, use it directly
+                            else if (image.url.startsWith('http://') || image.url.startsWith('https://')) {
+                              return image.url;
+                            }
+                            // If it's a relative path like /uploads/items/filename.ext, use it directly
+                            else if (image.url.startsWith('/uploads/')) {
+                              return image.url;
+                            }
+                            // If it's just a filename, prepend the uploads path
+                            else {
+                              return `/uploads/items/${image.url}`;
+                            }
+                          })()}
                           alt={image.alt}
                           className="w-full h-full object-cover"
                           onError={(e) => {
@@ -1380,6 +1722,155 @@ export default function Items() {
               />
             </div>
           </div>
+
+          {/* Barcode preview and reprint */}
+          {editingItem && (
+            <div className="mt-2 p-3 border rounded bg-white">
+              <div className="space-y-3">
+                {/* Batch Selection */}
+                {editingItem.batches && editingItem.batches.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Select Batch</Label>
+                    <Select
+                      value={selectedBatch !== null ? String(editingItem.batches.findIndex(b => b.batchNumber === selectedBatch.batchNumber)) : ""}
+                      onValueChange={(value) => {
+                        const index = parseInt(value);
+                        if (index >= 0 && index < editingItem.batches.length) {
+                          setSelectedBatch(editingItem.batches[index]);
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a batch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {editingItem.batches.map((batch, index) => (
+                          <SelectItem key={index} value={String(index)}>
+                            Batch: {batch.batchNumber} - Stock: {batch.quantity} {formData.unit || 'units'}
+                            {batch.expiryDate && ` - Exp: ${new Date(batch.expiryDate).toLocaleDateString('en-GB')}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedBatch && (
+                      <p className="text-xs text-muted-foreground">
+                        Selected: Batch {selectedBatch.batchNumber} - {selectedBatch.quantity} {formData.unit || 'units'} available
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between mb-2">
+                  <Label>Barcode Label Preview</Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      // If batches exist, require batch selection
+                      if ((editingItem.batches && editingItem.batches.length > 0) && !selectedBatch) {
+                        toast({
+                          title: "No Batch Selected",
+                          description: "Please select a batch to print labels",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+
+                      const imgData = window.__lastItemLabelDataUrl;
+                      if (!imgData) {
+                        toast({
+                          title: "Barcode Not Ready",
+                          description: "Please wait for barcode to load",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+
+                      const storeName = 'Murugan Stores';
+                      const itemName = formData.name || '';
+                      const batchNumber = selectedBatch ? selectedBatch.batchNumber : (formData.batchNumber || '-');
+                      const price = Number(formData.price || 0).toFixed(2);
+                      const expiry = selectedBatch && selectedBatch.expiryDate 
+                        ? new Date(selectedBatch.expiryDate).toLocaleDateString('en-GB')
+                        : (formData.expiryDate ? new Date(formData.expiryDate).toLocaleDateString('en-GB') : 'N/A');
+                      
+                      // Get quantity to print - use batch quantity if batch is selected, otherwise print 1
+                      const quantityToPrint = selectedBatch ? selectedBatch.quantity : 1;
+
+                      const printWin = window.open('', '_blank', 'width=380,height=600');
+                      let labelsHTML = '';
+                      
+                      // Generate labels based on batch stock count
+                      for (let i = 0; i < quantityToPrint; i++) {
+                        labelsHTML += `
+                          <div class="label" style="page-break-after: always; margin-bottom: 2mm;">
+                            <div class="header">${storeName}</div>
+                            <div class="barcode">${imgData ? `<img src="${imgData}" />` : ''}</div>
+                            <div class="footer">
+                              <div class="name">${itemName}</div>
+                              <div>Batch: ${batchNumber || '-'}</div>
+                              <div class="row">
+                                <span>Exp: ${expiry}</span>
+                                <span>Price: ₹${price}</span>
+                              </div>
+                            </div>
+                          </div>
+                        `;
+                      }
+
+                      printWin.document.write(`
+                        <html>
+                          <head>
+                            <title>Print Barcode Labels</title>
+                            <style>
+                              @page { size: 80mm 55mm; margin: 0; }
+                              html, body { height: 100%; }
+                              body{ margin:0; padding:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+                              .label { width: 80mm; min-height: 45mm; padding: 3mm; border: 0.6mm solid #1f2937; box-sizing: border-box; }
+                              .header { text-align:center; font-weight:700; font-size: 14px; border-bottom: 0.6mm solid #1f2937; padding-bottom: 1mm; margin-bottom: 1mm; }
+                              .barcode { display:flex; justify-content:center; align-items:center; min-height: 20mm; margin: 2mm 0; }
+                              .footer { border-top: 0.6mm solid #1f2937; padding-top: 1mm; margin-top: 1mm; font-size: 10px; }
+                              .row { display:flex; justify-content:space-between; font-size:10px; }
+                              img { max-width:100%; height:auto; }
+                              .name { font-weight:600; font-size:11px; margin-bottom:1mm; }
+                            </style>
+                          </head>
+                          <body>
+                            ${labelsHTML}
+                            <script>setTimeout(()=>{window.print();window.close();},300);</script>
+                          </body>
+                        </html>
+                      `);
+                      printWin.document.close();
+
+                      toast({
+                        title: "Printing Labels",
+                        description: selectedBatch 
+                          ? `Printing ${quantityToPrint} label(s) for Batch ${batchNumber}`
+                          : `Printing 1 label`,
+                      });
+                    }}
+                    disabled={editingItem.batches && editingItem.batches.length > 0 && !selectedBatch}
+                  >
+                    <Printer className="h-4 w-4 mr-2" />
+                    Print Label{selectedBatch && selectedBatch.quantity > 1 ? `s (${selectedBatch.quantity})` : ''}
+                  </Button>
+                </div>
+                <BarcodeLabel
+                  sku={formData.sku}
+                  barcode={formData.barcode}
+                  storeName={"Murugan Stores"}
+                  itemName={formData.name}
+                  amount={formData.price}
+                  batchNumber={selectedBatch ? selectedBatch.batchNumber : (formData.batchNumber || '')}
+                  expiryDate={selectedBatch && selectedBatch.expiryDate ? selectedBatch.expiryDate : formData.expiryDate}
+                  onCanvasReady={(canvas) => {
+                    try { window.__lastItemLabelDataUrl = canvas.toDataURL('image/png'); } catch {}
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           </div>
           
