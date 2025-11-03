@@ -10,6 +10,7 @@ import {
   Building2,
   ShoppingCart,
   Store,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,7 +22,8 @@ const navItems = [
   { icon: Archive, label: "Items", path: "/items" },
   { icon: Truck, label: "Suppliers", path: "/suppliers" },
   { icon: Building2, label: "Stores", path: "/stores" },
-   { icon: ShoppingCart, label: "Purchase Orders", path: "/purchase-orders" },
+  { icon: ShoppingCart, label: "Purchase Orders", path: "/purchase-orders" },
+  { icon: CreditCard, label: "Credits", path: "/credits" },
   { icon: Users, label: "Users", path: "/users" },
   { icon: BarChart3, label: "Reports", path: "/reports" },
 ];

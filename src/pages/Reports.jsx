@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Calendar, Download, TrendingUp, DollarSign, FileText, BarChart3, Users, Search, Package, Truck, CheckCircle, Clock, XCircle, ArrowLeft } from "lucide-react";
+import { Calendar, Download, TrendingUp, DollarSign, FileText, BarChart3, Users, Search, Package, Truck, CheckCircle, Clock, XCircle, ArrowLeft, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ import {
 import { MetricCard } from "@/components/MetricCard";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
 import { useToast } from "@/hooks/use-toast";
-import { billsAPI, usersAPI, purchaseOrdersAPI, suppliersAPI, itemsAPI, categoriesAPI } from "@/services/api";
+import { billsAPI, usersAPI, purchaseOrdersAPI, suppliersAPI, itemsAPI, categoriesAPI, creditsAPI, customerCreditsAPI } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 const COLORS = ['hsl(239 70% 55%)', 'hsl(142 76% 45%)', 'hsl(38 92% 50%)', 'hsl(0 84% 60%)', 'hsl(263 70% 50%)'];
@@ -51,7 +51,7 @@ export default function Reports() {
   const [selectedStoreId, setSelectedStoreId] = useState("all");
   const [poReportData, setPoReportData] = useState(null);
   const [poReportType, setPoReportType] = useState("monthly"); // "monthly", "daily", "supplierwise"
-  const [activeTab, setActiveTab] = useState("sales"); // "sales" or "purchase"
+  const [activeTab, setActiveTab] = useState("sales"); // "sales", "purchase", or "credits"
   // PO sub-tab removed; use poReportType to switch between summary/daily/supplierwise/stock
   const [poViewMode, setPoViewMode] = useState("summary"); // "summary" or "detailed"
   const [stockWithBatches, setStockWithBatches] = useState([]);
@@ -59,6 +59,16 @@ export default function Reports() {
   const [stockLoading, setStockLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState("all");
+  
+  // Credit Collection Report States
+  const [credits, setCredits] = useState([]);
+  const [customerCredits, setCustomerCredits] = useState([]);
+  const [creditReportData, setCreditReportData] = useState(null);
+  const [creditLoading, setCreditLoading] = useState(false);
+  const [selectedCreditSupplierId, setSelectedCreditSupplierId] = useState("all");
+  const [creditStatusFilter, setCreditStatusFilter] = useState("all");
+  const [creditViewMode, setCreditViewMode] = useState("summary"); // "summary" or "detailed"
+  const [creditTypeFilter, setCreditTypeFilter] = useState("po"); // "po" or "billing"
 
   const isAdmin = hasRole('admin');
   const isEmployee = hasRole('employee');
@@ -80,6 +90,10 @@ export default function Reports() {
       if (saved.selectedStoreId) setSelectedStoreId(saved.selectedStoreId);
       if (saved.selectedCategoryId) setSelectedCategoryId(saved.selectedCategoryId);
       if (saved.stockSearch) setStockSearch(saved.stockSearch);
+      if (saved.selectedCreditSupplierId) setSelectedCreditSupplierId(saved.selectedCreditSupplierId);
+      if (saved.creditStatusFilter) setCreditStatusFilter(saved.creditStatusFilter);
+      if (saved.creditViewMode) setCreditViewMode(saved.creditViewMode);
+      if (saved.creditTypeFilter) setCreditTypeFilter(saved.creditTypeFilter);
     } catch {}
 
     loadUsers();
@@ -89,6 +103,9 @@ export default function Reports() {
     loadReportData();
     if (activeTab === "purchase") {
       loadPOReportData();
+    }
+    if (activeTab === "credits") {
+      loadCreditReportData();
     }
   }, []);
 
@@ -106,9 +123,13 @@ export default function Reports() {
       selectedStoreId,
       selectedCategoryId,
       stockSearch,
+      selectedCreditSupplierId,
+      creditStatusFilter,
+      creditViewMode,
+      creditTypeFilter,
     };
     localStorage.setItem('reports_filters', JSON.stringify(toSave));
-  }, [activeTab, reportType, poReportType, poViewMode, dateFrom, dateTo, selectedUserId, selectedSupplierId, selectedStoreId, selectedCategoryId, stockSearch]);
+  }, [activeTab, reportType, poReportType, poViewMode, dateFrom, dateTo, selectedUserId, selectedSupplierId, selectedStoreId, selectedCategoryId, stockSearch, selectedCreditSupplierId, creditStatusFilter, creditViewMode, creditTypeFilter]);
 
   useEffect(() => {
     loadReportData();
@@ -122,7 +143,10 @@ export default function Reports() {
         loadPOReportData();
       }
     }
-  }, [dateFrom, dateTo, selectedSupplierId, selectedStoreId, stockSearch, selectedCategoryId, poReportType]);
+    if (activeTab === "credits") {
+      loadCreditReportData();
+    }
+  }, [dateFrom, dateTo, selectedSupplierId, selectedStoreId, stockSearch, selectedCategoryId, poReportType, selectedCreditSupplierId, creditStatusFilter, creditTypeFilter, creditViewMode, activeTab]);
 
   const loadUsers = async () => {
     try {
@@ -165,6 +189,143 @@ export default function Reports() {
     } catch (error) {
       console.error("Error loading categories:", error);
     }
+  };
+
+  const loadCreditReportData = async () => {
+    setCreditLoading(true);
+    try {
+      const params = {
+        limit: 1000, // Get all credits for the report
+        page: 1
+      };
+      if (dateFrom) params.startDate = dateFrom;
+      if (dateTo) params.endDate = dateTo;
+      if (creditStatusFilter && creditStatusFilter !== "all") {
+        params.status = creditStatusFilter;
+      }
+
+      if (creditTypeFilter === "po") {
+        // Load PO Credits
+        if (selectedCreditSupplierId && selectedCreditSupplierId !== "all") {
+          params.supplierId = selectedCreditSupplierId;
+        }
+        const response = await creditsAPI.getCredits(params);
+        const creditsData = response.data?.credits || [];
+        setCredits(creditsData);
+        setCustomerCredits([]);
+        
+        // Process credit report data
+        const processedData = processCreditReportData(creditsData, "po");
+        setCreditReportData(processedData);
+      } else {
+        // Load Billing Credits
+        const response = await customerCreditsAPI.getCustomerCredits(params);
+        const creditsData = response.data?.credits || [];
+        setCustomerCredits(creditsData);
+        setCredits([]);
+        
+        // Process credit report data
+        const processedData = processCreditReportData(creditsData, "billing");
+        setCreditReportData(processedData);
+      }
+    } catch (error) {
+      console.error("Error loading credit report data:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load credit collection data",
+        variant: "destructive",
+      });
+    } finally {
+      setCreditLoading(false);
+    }
+  };
+
+  const processCreditReportData = (creditsData, type = "po") => {
+    if (!creditsData || creditsData.length === 0) {
+      return {
+        summary: {
+          totalCredits: 0,
+          totalOriginalAmount: 0,
+          totalPaidAmount: 0,
+          totalBalanceAmount: 0,
+          pendingCount: 0,
+          partiallyPaidCount: 0,
+          paidCount: 0,
+        },
+        tableData: [],
+        groupData: []
+      };
+    }
+
+    // Calculate summary
+    const summary = creditsData.reduce((acc, credit) => {
+      acc.totalCredits += 1;
+      acc.totalOriginalAmount += credit.originalAmount || 0;
+      acc.totalPaidAmount += credit.paidAmount || 0;
+      acc.totalBalanceAmount += credit.balanceAmount || 0;
+      
+      if (credit.status === 'pending') acc.pendingCount += 1;
+      else if (credit.status === 'partially_paid') acc.partiallyPaidCount += 1;
+      else if (credit.status === 'paid') acc.paidCount += 1;
+      
+      return acc;
+    }, {
+      totalCredits: 0,
+      totalOriginalAmount: 0,
+      totalPaidAmount: 0,
+      totalBalanceAmount: 0,
+      pendingCount: 0,
+      partiallyPaidCount: 0,
+      paidCount: 0,
+    });
+
+    // Process by supplier (PO) or customer (Billing)
+    const groupData = creditsData.reduce((acc, credit) => {
+      let groupKey;
+      if (type === "po") {
+        groupKey = credit.supplier?.companyName || 'Unknown Supplier';
+      } else {
+        groupKey = credit.customerName || 'Unknown Customer';
+      }
+      
+      if (!acc[groupKey]) {
+        acc[groupKey] = {
+          name: groupKey,
+          credits: 0,
+          totalOriginalAmount: 0,
+          totalPaidAmount: 0,
+          totalBalanceAmount: 0
+        };
+      }
+      acc[groupKey].credits += 1;
+      acc[groupKey].totalOriginalAmount += credit.originalAmount || 0;
+      acc[groupKey].totalPaidAmount += credit.paidAmount || 0;
+      acc[groupKey].totalBalanceAmount += credit.balanceAmount || 0;
+      return acc;
+    }, {});
+
+    // Sort table data by date
+    const sortDateField = type === "po" ? "orderDate" : "billDate";
+    const sortedTableData = creditsData.sort((a, b) => {
+      const dateA = a[sortDateField] ? new Date(a[sortDateField]) : new Date(0);
+      const dateB = b[sortDateField] ? new Date(b[sortDateField]) : new Date(0);
+      return dateB - dateA;
+    });
+
+    return {
+      summary: {
+        totalCredits: summary.totalCredits,
+        totalOriginalAmount: Math.round(summary.totalOriginalAmount),
+        totalPaidAmount: Math.round(summary.totalPaidAmount),
+        totalBalanceAmount: Math.round(summary.totalBalanceAmount),
+        pendingCount: summary.pendingCount,
+        partiallyPaidCount: summary.partiallyPaidCount,
+        paidCount: summary.paidCount,
+      },
+      tableData: sortedTableData,
+      groupData: Object.values(groupData).sort((a, b) => b.totalBalanceAmount - a.totalBalanceAmount),
+      type: type
+    };
   };
 
   const loadPOReportData = async () => {
@@ -606,9 +767,20 @@ export default function Reports() {
           <Truck className="h-4 w-4" />
           Purchase Orders
         </Button>
+        <Button
+          variant={activeTab === "credits" ? "default" : "ghost"}
+          onClick={() => {
+            setActiveTab("credits");
+            loadCreditReportData();
+          }}
+          className="flex items-center gap-2"
+        >
+          <CreditCard className="h-4 w-4" />
+          Credit Collection
+        </Button>
       </motion.div>
 
-      {(activeTab === "sales" || activeTab === "purchase") && (
+      {(activeTab === "sales" || activeTab === "purchase" || activeTab === "credits") && (
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -617,11 +789,11 @@ export default function Reports() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />
-                {activeTab === "sales" ? "Sales Report Filters" : "Purchase Order Filters"}
+                {activeTab === "sales" ? "Sales Report Filters" : activeTab === "purchase" ? "Purchase Order Filters" : "Credit Collection Filters"}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`grid gap-4 ${activeTab === "sales" ? "md:grid-cols-4" : "md:grid-cols-6"}`}>
+            <div className={`grid gap-4 ${activeTab === "sales" ? "md:grid-cols-4" : activeTab === "purchase" ? "md:grid-cols-6" : "md:grid-cols-6"}`}>
               {activeTab === "sales" ? (
                 <>
               <div className="space-y-2">
@@ -699,7 +871,7 @@ export default function Reports() {
                 </div>
                   )}
                 </>
-              ) : (
+              ) : activeTab === "purchase" ? (
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="poReportType">Report Type</Label>
@@ -812,7 +984,111 @@ export default function Reports() {
                     </>
                   )}
                 </>
-              )}
+              ) : activeTab === "credits" ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="creditTypeFilter">Credit Type</Label>
+                    <Select value={creditTypeFilter} onValueChange={setCreditTypeFilter}>
+                      <SelectTrigger id="creditTypeFilter">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="po">PO Credit</SelectItem>
+                        <SelectItem value="billing">Billing Credit</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="creditViewMode">Report View</Label>
+                    <Select value={creditViewMode} onValueChange={setCreditViewMode}>
+                      <SelectTrigger id="creditViewMode">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="summary">Summary Report</SelectItem>
+                        <SelectItem value="detailed">Detailed Report</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="creditDateFrom">From Date</Label>
+                    <Input
+                      id="creditDateFrom"
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="creditDateTo">To Date</Label>
+                    <Input
+                      id="creditDateTo"
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                    />
+                  </div>
+                  
+                  {creditTypeFilter === "po" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="creditSupplier">Supplier</Label>
+                      <Select value={selectedCreditSupplierId} onValueChange={setSelectedCreditSupplierId}>
+                        <SelectTrigger id="creditSupplier">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Suppliers</SelectItem>
+                          {suppliers.map((supplier) => (
+                            <SelectItem key={supplier._id} value={supplier._id}>
+                              {supplier.companyName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="creditStatus">Status</Label>
+                    <Select value={creditStatusFilter} onValueChange={setCreditStatusFilter}>
+                      <SelectTrigger id="creditStatus">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="partially_paid">Partially Paid</SelectItem>
+                        <SelectItem value="paid">Paid</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Export</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => handleExport("pdf")}
+                        className="flex-1"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        PDF
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleExport("csv")}
+                        className="flex-1"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        CSV
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -1508,6 +1784,265 @@ export default function Reports() {
           <h3 className="text-lg font-semibold mb-2">No purchase order data available</h3>
           <p className="text-muted-foreground">Try adjusting your filters to see data</p>
         </div>
+      )}
+
+      {/* Credit Collection Report */}
+      {activeTab === "credits" && creditReportData && (
+        <>
+          {creditViewMode === "summary" && (
+            <>
+              <div className="grid md:grid-cols-4 gap-4 md:gap-6">
+                <MetricCard
+                  title="Total Credits"
+                  value={creditReportData.summary.totalCredits}
+                  icon={CreditCard}
+                  delay={0.1}
+                />
+                <MetricCard
+                  title="Total Original Amount"
+                  value={`₹${creditReportData.summary.totalOriginalAmount}`}
+                  icon={DollarSign}
+                  delay={0.2}
+                />
+                <MetricCard
+                  title="Total Paid Amount"
+                  value={`₹${creditReportData.summary.totalPaidAmount}`}
+                  icon={CheckCircle}
+                  delay={0.3}
+                />
+                <MetricCard
+                  title="Total Balance"
+                  value={`₹${creditReportData.summary.totalBalanceAmount}`}
+                  icon={TrendingUp}
+                  delay={0.4}
+                />
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4 md:gap-6">
+                <MetricCard
+                  title="Pending Credits"
+                  value={creditReportData.summary.pendingCount}
+                  icon={Clock}
+                  delay={0.5}
+                />
+                <MetricCard
+                  title="Partially Paid"
+                  value={creditReportData.summary.partiallyPaidCount}
+                  icon={Package}
+                  delay={0.6}
+                />
+                <MetricCard
+                  title="Fully Paid"
+                  value={creditReportData.summary.paidCount}
+                  icon={CheckCircle}
+                  delay={0.7}
+                />
+              </div>
+
+              {creditReportData.groupData.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8 }}
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>{creditTypeFilter === "po" ? "Supplier-wise Credit Summary" : "Customer-wise Credit Summary"}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{creditTypeFilter === "po" ? "Supplier" : "Customer"}</TableHead>
+                          <TableHead className="text-right">Credits</TableHead>
+                          <TableHead className="text-right">Original Amount (₹)</TableHead>
+                          <TableHead className="text-right">Paid Amount (₹)</TableHead>
+                          <TableHead className="text-right">Balance (₹)</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {creditReportData.groupData.map((item, index) => (
+                          <TableRow key={index}>
+                            <TableCell className="font-medium">{item.name}</TableCell>
+                            <TableCell className="text-right">{item.credits}</TableCell>
+                            <TableCell className="text-right">₹{item.totalOriginalAmount}</TableCell>
+                            <TableCell className="text-right">₹{item.totalPaidAmount}</TableCell>
+                            <TableCell className="text-right font-semibold text-blue-600">
+                              ₹{item.totalBalanceAmount}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+              )}
+            </>
+          )}
+
+          {creditViewMode === "detailed" && creditReportData.tableData.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.9 }}
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>Detailed Credit Collection Report</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          {creditTypeFilter === "po" ? (
+                            <>
+                              <TableHead>PO Number</TableHead>
+                              <TableHead>Supplier</TableHead>
+                              <TableHead>Order Date</TableHead>
+                            </>
+                          ) : (
+                            <>
+                              <TableHead>Bill Number</TableHead>
+                              <TableHead>Customer</TableHead>
+                              <TableHead>Customer Phone</TableHead>
+                              <TableHead>Bill Date</TableHead>
+                            </>
+                          )}
+                          <TableHead>Initial Amount (₹)</TableHead>
+                          <TableHead>Current Amount (₹)</TableHead>
+                          <TableHead>Paid Amount (₹)</TableHead>
+                          <TableHead>Balance (₹)</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Last Amount Edit Date</TableHead>
+                          <TableHead>Payment Details (Amount & Date)</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {creditReportData.tableData.map((credit, index) => (
+                          <TableRow key={credit._id || index}>
+                            {creditTypeFilter === "po" ? (
+                              <>
+                                <TableCell className="font-medium">{credit.poNumber}</TableCell>
+                                <TableCell>{credit.supplier?.companyName || 'Unknown'}</TableCell>
+                                <TableCell>
+                                  {credit.orderDate
+                                    ? new Date(credit.orderDate).toLocaleDateString('en-GB')
+                                    : 'N/A'}
+                                </TableCell>
+                              </>
+                            ) : (
+                              <>
+                                <TableCell className="font-medium">{credit.billNumber || 'N/A'}</TableCell>
+                                <TableCell>{credit.customerName || 'Unknown'}</TableCell>
+                                <TableCell>{credit.customerPhone || 'N/A'}</TableCell>
+                                <TableCell>
+                                  {credit.billDate
+                                    ? new Date(credit.billDate).toLocaleDateString('en-GB')
+                                    : 'N/A'}
+                                </TableCell>
+                              </>
+                            )}
+                            <TableCell className="text-right">
+                              ₹{Math.round(credit.initialOriginalAmount || credit.originalAmount || 0)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ₹{Math.round(credit.originalAmount || 0)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ₹{Math.round(credit.paidAmount || 0)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-blue-600">
+                              ₹{Math.round(credit.balanceAmount || 0)}
+                            </TableCell>
+                            <TableCell>
+                              {credit.status === 'pending' && (
+                                <Badge variant="destructive">Pending</Badge>
+                              )}
+                              {credit.status === 'partially_paid' && (
+                                <Badge variant="default">Partially Paid</Badge>
+                              )}
+                              {credit.status === 'paid' && (
+                                <Badge variant="secondary">Paid</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {credit.amountChangeHistory && credit.amountChangeHistory.length > 0 ? (
+                                <div className="text-xs">
+                                  {new Date(
+                                    credit.amountChangeHistory[credit.amountChangeHistory.length - 1].changeDate
+                                  ).toLocaleDateString('en-GB', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                  <div className="text-muted-foreground mt-1">
+                                    ₹{Math.round(credit.amountChangeHistory[credit.amountChangeHistory.length - 1].previousAmount)} → ₹{Math.round(credit.amountChangeHistory[credit.amountChangeHistory.length - 1].updatedAmount)}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">Never edited</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {credit.paymentHistory && credit.paymentHistory.length > 0 ? (
+                                <div className="text-xs space-y-2 max-w-xs">
+                                  {credit.paymentHistory.map((payment, idx) => (
+                                    <div key={idx} className="border-l-2 border-blue-500 pl-2 py-1">
+                                      <div className="font-medium">
+                                        ₹{Math.round(payment.amount)}
+                                      </div>
+                                      <div className="text-muted-foreground">
+                                        {new Date(payment.paymentDate).toLocaleDateString('en-GB', {
+                                          day: '2-digit',
+                                          month: '2-digit',
+                                          year: 'numeric',
+                                          hour: '2-digit',
+                                          minute: '2-digit'
+                                        })}
+                                      </div>
+                                      {payment.notes && (
+                                        <div className="text-muted-foreground italic text-xs">
+                                          {payment.notes}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">No payments</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {creditLoading && (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="text-gray-600 mt-2">Loading credit collection data...</p>
+            </div>
+          )}
+
+          {!creditLoading && (!creditReportData || creditReportData.tableData.length === 0) && (
+            <div className="text-center py-12">
+              <CreditCard className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No credit data available</h3>
+              <p className="text-muted-foreground">Try adjusting your filters to see data</p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
