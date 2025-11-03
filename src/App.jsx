@@ -19,6 +19,7 @@ import Suppliers from "./pages/Suppliers";
 import Stores from "./pages/Stores";
 import SelectStore from "./pages/SelectStore";
 import PurchaseOrders from "./pages/PurchaseOrders";
+import Credits from "./pages/Credits";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -124,6 +125,14 @@ const App = () => (
               element={
                 <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <Layout><PurchaseOrders /></Layout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/credits" 
+              element={
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
+                  <Layout><Credits /></Layout>
                 </ProtectedRoute>
               } 
             />

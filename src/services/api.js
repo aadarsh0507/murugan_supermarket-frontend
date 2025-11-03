@@ -540,6 +540,113 @@ export const purchaseOrdersAPI = {
   },
 };
 
+// Credits API
+export const creditsAPI = {
+  // Get all credits
+  getCredits: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/credits?${queryString}` : '/credits';
+    return await apiRequest(endpoint);
+  },
+
+  // Get single credit
+  getCredit: async (creditId) => {
+    return await apiRequest(`/credits/${creditId}`);
+  },
+
+  // Create credit from purchase order
+  createCredit: async (purchaseOrderId, initialPayment = 0, notes = '') => {
+    return await apiRequest('/credits', {
+      method: 'POST',
+      body: JSON.stringify({ purchaseOrderId, initialPayment, notes }),
+    });
+  },
+
+  // Update credit original amount
+  updateCreditAmount: async (creditId, newAmount, notes = '') => {
+    return await apiRequest(`/credits/${creditId}/amount`, {
+      method: 'PUT',
+      body: JSON.stringify({ newAmount, notes }),
+    });
+  },
+
+  // Update credit payment
+  updateCreditPayment: async (creditId, paymentAmount, notes = '') => {
+    return await apiRequest(`/credits/${creditId}/payment`, {
+      method: 'PUT',
+      body: JSON.stringify({ paymentAmount, notes }),
+    });
+  },
+
+  // Delete credit
+  deleteCredit: async (creditId) => {
+    return await apiRequest(`/credits/${creditId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Get credits summary by supplier
+  getCreditsSummaryBySupplier: async (supplierId) => {
+    return await apiRequest(`/credits/summary/${supplierId}`);
+  },
+};
+
+// Customer Credits API
+export const customerCreditsAPI = {
+  // Get all customer credits
+  getCustomerCredits: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/customer-credits?${queryString}` : '/customer-credits';
+    return await apiRequest(endpoint);
+  },
+
+  // Get single customer credit
+  getCustomerCredit: async (creditId) => {
+    return await apiRequest(`/customer-credits/${creditId}`);
+  },
+
+  // Create customer credit from bill
+  createCustomerCredit: async (billId, customerData, initialPayment = 0, notes = '') => {
+    return await apiRequest('/customer-credits', {
+      method: 'POST',
+      body: JSON.stringify({
+        billId,
+        ...customerData,
+        initialPayment,
+        notes
+      }),
+    });
+  },
+
+  // Update customer credit amount
+  updateCustomerCreditAmount: async (creditId, newAmount, notes = '') => {
+    return await apiRequest(`/customer-credits/${creditId}/amount`, {
+      method: 'PUT',
+      body: JSON.stringify({ newAmount, notes }),
+    });
+  },
+
+  // Update customer credit payment
+  updateCustomerCreditPayment: async (creditId, paymentAmount, notes = '') => {
+    return await apiRequest(`/customer-credits/${creditId}/payment`, {
+      method: 'PUT',
+      body: JSON.stringify({ paymentAmount, notes }),
+    });
+  },
+
+  // Delete customer credit
+  deleteCustomerCredit: async (creditId) => {
+    return await apiRequest(`/customer-credits/${creditId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Get customer by phone number
+  getCustomerByPhone: async (phone) => {
+    return await apiRequest(`/customer-credits/customer-by-phone/${encodeURIComponent(phone)}`);
+  },
+};
+
 // Barcodes API
 export const barcodesAPI = {
   // Get item by barcode

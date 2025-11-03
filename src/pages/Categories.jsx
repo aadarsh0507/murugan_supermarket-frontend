@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/Modal";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -80,6 +81,7 @@ const Categories = () => {
       isActive: true,
       isDigital: false,
       requiresPrescription: false,
+      isBOGO: false,
       expiryDate: ""
     }
   });
@@ -1138,6 +1140,23 @@ const Categories = () => {
                       placeholder="0.00"
                     />
                   </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="itemIsBOGO"
+                    checked={multiStepData.item.isBOGO || false}
+                    onCheckedChange={(checked) => setMultiStepData({
+                      ...multiStepData,
+                      item: { ...multiStepData.item, isBOGO: checked }
+                    })}
+                  />
+                  <Label
+                    htmlFor="itemIsBOGO"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                  >
+                    Buy One Get One (BOGO) Offer
+                  </Label>
                 </div>
 
                  {/* Created Items List for Selected Subcategory */}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Search, X, Save, ShoppingCart, Check, Scale, Tag, Percent, Receipt, Minus } from "lucide-react";
+import { Plus, Search, X, Save, ShoppingCart, Check, Scale, Tag, Percent, Receipt, Minus, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { purchaseOrdersAPI, suppliersAPI, categoriesAPI } from "@/services/api";
+import { purchaseOrdersAPI, suppliersAPI, categoriesAPI, creditsAPI } from "@/services/api";
 import BarcodeLabel from "@/components/BarcodeLabel";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -82,7 +82,8 @@ const PurchaseOrders = () => {
     price: 0,
     discount: 0,
     totalTax: 0,
-    totalAmount: 0
+    totalAmount: 0,
+    partialPayment: ""
   });
 
   // Load data when component mounts or when selected store changes
@@ -566,81 +567,101 @@ const PurchaseOrders = () => {
     }));
   };
 
+  const validateAndPreparePOData = () => {
+    // Filter out empty items - check for itemId (properly selected item) and quantity > 0
+    const validItems = formData.items.filter(item => 
+      item.itemId && item.poQty > 0
+    );
+
+    if (validItems.length === 0) {
+      toast({ 
+        title: "Error", 
+        description: "Please add at least one item with quantity greater than 0", 
+        variant: "destructive" 
+      });
+      return null;
+    }
+
+    // Validate: batch number must be unique per same item (allow same batch across different items)
+    const seenByItem = new Map(); // key: item identity -> Set(batchNumber)
+    for (let i = 0; i < validItems.length; i++) {
+      const it = validItems[i];
+      const itemIdentity = (it.sku && it.sku.trim() !== "") ? `sku:${it.sku.trim()}` : `name:${(it.particulars || '').trim().toLowerCase()}`;
+      const batch = (it.batchNumber || '').trim();
+      if (batch !== "") {
+        if (!seenByItem.has(itemIdentity)) {
+          seenByItem.set(itemIdentity, new Set());
+        }
+        const batches = seenByItem.get(itemIdentity);
+        if (batches.has(batch)) {
+          toast({
+            title: "Duplicate Batch Number",
+            description: `Batch '${batch}' is repeated for the same item (${it.particulars || it.sku}). Each item's batches must be unique.`,
+            variant: "destructive",
+          });
+          return null;
+        }
+        batches.add(batch);
+      }
+    }
+
+    const poData = {
+      supplier: formData.supplier,
+      store: formData.store,
+      orderDate: formData.quotationDate,
+      // Only include expectedDeliveryDate if it has a value
+      ...(formData.dueDate && formData.dueDate.trim() !== "" && { expectedDeliveryDate: formData.dueDate }),
+      items: validItems.map(item => {
+        const itemData = {
+          itemName: item.particulars,
+          quantity: item.poQty,
+          costPrice: item.price,
+          total: item.total
+        };
+        
+        // Only include optional fields if they have values
+        if (item.sku && item.sku.trim() !== "") itemData.sku = item.sku;
+        if (item.unit && item.unit.trim() !== "") itemData.unit = item.unit;
+        if (item.categoryName && item.categoryName.trim() !== "") itemData.categoryName = item.categoryName;
+        if (item.subcategoryName && item.subcategoryName.trim() !== "") itemData.subcategoryName = item.subcategoryName;
+        if (item.batchNumber && item.batchNumber.trim() !== "") itemData.batchNumber = item.batchNumber;
+        if (item.hsnNumber && item.hsnNumber.trim() !== "") itemData.hsnNumber = item.hsnNumber;
+        if (item.expiryDate && item.expiryDate.trim() !== "") itemData.expiryDate = item.expiryDate;
+        
+        return itemData;
+      }),
+      tax: formData.totalTax || 0,
+      discount: formData.discount || 0,
+      shipping: parseFloat(formData.freight || 0),
+      // Only include notes if it has a value
+      ...(formData.remarks && formData.remarks.trim() !== "" && { notes: formData.remarks })
+    };
+
+    return poData;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     
     try {
-      // Filter out empty items - check for itemId (properly selected item) and quantity > 0
-      const validItems = formData.items.filter(item => 
-        item.itemId && item.poQty > 0
-      );
-
-      if (validItems.length === 0) {
-        toast({ 
-          title: "Error", 
-          description: "Please add at least one item with quantity greater than 0", 
-          variant: "destructive" 
-        });
+      const poData = validateAndPreparePOData();
+      if (!poData) {
         setSaving(false);
         return;
       }
 
-      // Validate: batch number must be unique per same item (allow same batch across different items)
-      const seenByItem = new Map(); // key: item identity -> Set(batchNumber)
-      for (let i = 0; i < validItems.length; i++) {
-        const it = validItems[i];
-        const itemIdentity = (it.sku && it.sku.trim() !== "") ? `sku:${it.sku.trim()}` : `name:${(it.particulars || '').trim().toLowerCase()}`;
-        const batch = (it.batchNumber || '').trim();
-        if (batch !== "") {
-          if (!seenByItem.has(itemIdentity)) {
-            seenByItem.set(itemIdentity, new Set());
-          }
-          const batches = seenByItem.get(itemIdentity);
-          if (batches.has(batch)) {
-            toast({
-              title: "Duplicate Batch Number",
-              description: `Batch '${batch}' is repeated for the same item (${it.particulars || it.sku}). Each item's batches must be unique.`,
-              variant: "destructive",
-            });
-            setSaving(false);
-            return;
-          }
-          batches.add(batch);
-        }
+      // Validate partial payment if entered
+      const partialPayment = parseFloat(formData.partialPayment || 0);
+      if (partialPayment > 0 && partialPayment > formData.totalAmount) {
+        toast({
+          title: "Invalid Amount",
+          description: `Partial payment cannot exceed total amount of ₹${formData.totalAmount}`,
+          variant: "destructive"
+        });
+        setSaving(false);
+        return;
       }
-
-      const poData = {
-        supplier: formData.supplier,
-        store: formData.store,
-        orderDate: formData.quotationDate,
-        // Only include expectedDeliveryDate if it has a value
-        ...(formData.dueDate && formData.dueDate.trim() !== "" && { expectedDeliveryDate: formData.dueDate }),
-        items: validItems.map(item => {
-          const itemData = {
-            itemName: item.particulars,
-            quantity: item.poQty,
-            costPrice: item.price,
-            total: item.total
-          };
-          
-          // Only include optional fields if they have values
-          if (item.sku && item.sku.trim() !== "") itemData.sku = item.sku;
-          if (item.unit && item.unit.trim() !== "") itemData.unit = item.unit;
-          if (item.categoryName && item.categoryName.trim() !== "") itemData.categoryName = item.categoryName;
-          if (item.subcategoryName && item.subcategoryName.trim() !== "") itemData.subcategoryName = item.subcategoryName;
-          if (item.batchNumber && item.batchNumber.trim() !== "") itemData.batchNumber = item.batchNumber;
-          if (item.hsnNumber && item.hsnNumber.trim() !== "") itemData.hsnNumber = item.hsnNumber;
-          if (item.expiryDate && item.expiryDate.trim() !== "") itemData.expiryDate = item.expiryDate;
-          
-          return itemData;
-        }),
-        tax: formData.totalTax || 0,
-        discount: formData.discount || 0,
-        shipping: parseFloat(formData.freight || 0),
-        // Only include notes if it has a value
-        ...(formData.remarks && formData.remarks.trim() !== "" && { notes: formData.remarks })
-      };
 
       let createdPO = null;
       if (editingPO) {
@@ -650,6 +671,24 @@ const PurchaseOrders = () => {
         const response = await purchaseOrdersAPI.createPurchaseOrder(poData);
         createdPO = response.data;
         toast({ title: "Success", description: "PO created and barcodes generated" });
+        
+        // If partial payment is entered, create credit with partial payment
+        if (partialPayment > 0 && partialPayment < formData.totalAmount) {
+          try {
+            await creditsAPI.createCredit(createdPO._id, partialPayment, "Initial partial payment");
+            toast({
+              title: "Credit Created",
+              description: `Credit created with partial payment of ₹${Math.round(partialPayment)}. Remaining amount: ₹${Math.round(formData.totalAmount - partialPayment)}`
+            });
+          } catch (creditError) {
+            console.error('Error creating credit with partial payment:', creditError);
+            toast({
+              title: "Warning",
+              description: creditError.response?.data?.message || "PO created but failed to create credit",
+              variant: "destructive"
+            });
+          }
+        }
         
         // Fetch barcodes for the created PO
         try {
@@ -677,6 +716,103 @@ const PurchaseOrders = () => {
         } else if (error.response.data.errors && error.response.data.errors.length > 0) {
           const validationErrors = error.response.data.errors;
           console.error("Validation errors:", validationErrors);
+          const errorMessages = validationErrors.map(err => {
+            const field = err.path || err.param || 'field';
+            return `${field}: ${err.msg}`;
+          });
+          errorMessage = `Validation failed:\n${errorMessages.join('\n')}`;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      toast({ 
+        title: "Error", 
+        description: errorMessage, 
+        variant: "destructive" 
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCredit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    
+    try {
+      const poData = validateAndPreparePOData();
+      if (!poData) {
+        setSaving(false);
+        return;
+      }
+
+      // Validate partial payment if entered
+      const partialPayment = parseFloat(formData.partialPayment || 0);
+      if (partialPayment > 0 && partialPayment > formData.totalAmount) {
+        toast({
+          title: "Invalid Amount",
+          description: `Partial payment cannot exceed total amount of ₹${formData.totalAmount}`,
+          variant: "destructive"
+        });
+        setSaving(false);
+        return;
+      }
+
+      // First create the purchase order
+      let createdPO = null;
+      if (editingPO) {
+        createdPO = await purchaseOrdersAPI.updatePurchaseOrder(editingPO._id, poData);
+      } else {
+        const response = await purchaseOrdersAPI.createPurchaseOrder(poData);
+        createdPO = response.data;
+      }
+
+      // Then create credit record with partial payment if entered
+      try {
+        const paymentNote = partialPayment > 0 
+          ? `Initial partial payment of ₹${Math.round(partialPayment)}` 
+          : "Credit entry";
+        await creditsAPI.createCredit(createdPO._id, partialPayment, paymentNote);
+        toast({ 
+          title: "Success", 
+          description: partialPayment > 0 
+            ? `Purchase order saved as credit with partial payment of ₹${Math.round(partialPayment)}. Remaining: ₹${Math.round(formData.totalAmount - partialPayment)}`
+            : "Purchase order saved as credit successfully"
+        });
+      } catch (creditError) {
+        console.error('Error creating credit:', creditError);
+        toast({ 
+          title: "Warning", 
+          description: creditError.response?.data?.message || "PO created but failed to save as credit",
+          variant: "destructive"
+        });
+      }
+
+      // Fetch barcodes for the created PO (same as in handleSubmit)
+      if (!editingPO) {
+        try {
+          const barcodesResponse = await purchaseOrdersAPI.getPurchaseOrderBarcodes(createdPO._id);
+          setBarcodeData(barcodesResponse.data);
+          setCurrentPOId(createdPO._id);
+          setShowBarcodeModal(true);
+        } catch (error) {
+          console.error("Error fetching barcodes:", error);
+        }
+      }
+      
+      // Reset form
+      handleNewPO();
+    } catch (error) {
+      console.error('Error saving purchase order as credit:', error);
+      
+      let errorMessage = "Failed to save purchase order as credit";
+      
+      if (error.response && error.response.data) {
+        if (error.response.data.message) {
+          errorMessage = error.response.data.message;
+        } else if (error.response.data.errors && error.response.data.errors.length > 0) {
+          const validationErrors = error.response.data.errors;
           const errorMessages = validationErrors.map(err => {
             const field = err.path || err.param || 'field';
             return `${field}: ${err.msg}`;
@@ -776,6 +912,10 @@ const PurchaseOrders = () => {
               <Button type="submit" form="poForm" variant="default" size="sm" disabled={saving}>
                 <ShoppingCart className="h-4 w-4 mr-1" />
                 GENERATE
+              </Button>
+              <Button type="button" form="poForm" onClick={handleCredit} variant="outline" size="sm" disabled={saving}>
+                <CreditCard className="h-4 w-4 mr-1" />
+                CREDIT
               </Button>
               <Button type="button" variant="destructive" size="sm" onClick={handleNewPO}>
                 <X className="h-4 w-4 mr-1" />
@@ -888,7 +1028,7 @@ const PurchaseOrders = () => {
         {/* Summary Section */}
         <Card>
           <CardContent className="pt-6">
-            <div className="grid grid-cols-6 gap-4">
+            <div className="grid grid-cols-6 gap-4 mb-4">
               <div className="flex items-center gap-2">
                 <Scale className="h-5 w-5 text-blue-500" />
                 <span className="text-sm">Total Items: <strong>{formData.totalItems}</strong></span>
@@ -913,6 +1053,41 @@ const PurchaseOrders = () => {
                 <Receipt className="h-5 w-5 text-blue-600" />
                 <span className="text-sm">Total Amount: <strong>₹{Math.round(formData.totalAmount)}</strong></span>
               </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4 pt-4 border-t">
+              <div>
+                <Label>Partial Payment (Optional)</Label>
+                <div className="relative">
+                  <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">₹</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max={formData.totalAmount}
+                    value={formData.partialPayment}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value) || 0;
+                      if (value > formData.totalAmount) {
+                        toast({
+                          title: "Invalid Amount",
+                          description: `Partial payment cannot exceed total amount of ₹${formData.totalAmount}`,
+                          variant: "destructive"
+                        });
+                        return;
+                      }
+                      setFormData({...formData, partialPayment: e.target.value});
+                    }}
+                    placeholder="0"
+                    className="pl-6"
+                  />
+                </div>
+                  {formData.partialPayment && parseFloat(formData.partialPayment) > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Remaining: ₹{Math.round(formData.totalAmount - parseFloat(formData.partialPayment || 0))}
+                  </p>
+                )}
+              </div>
+              <div className="col-span-2"></div>
             </div>
           </CardContent>
         </Card>
@@ -1204,20 +1379,32 @@ const PurchaseOrders = () => {
                         </Select>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          value={item.discountType === '%' ? (item.disPercent || '') : (item.dis || '')}
-                          onChange={(e) => {
-                            const value = parseFloat(e.target.value) || 0;
-                            if (item.discountType === '%') {
+                        {item.discountType === '%' ? (
+                          <Input
+                            type="number"
+                            value={item.disPercent || ''}
+                            onChange={(e) => {
+                              const value = parseFloat(e.target.value) || 0;
                               updateItem(index, 'disPercent', value);
-                            } else {
-                              updateItem(index, 'dis', value);
-                            }
-                          }}
-                          placeholder={item.discountType === '%' ? "%" : "Amount"}
-                          className="w-full max-w-14"
-                        />
+                            }}
+                            placeholder="%"
+                            className="w-full max-w-14"
+                          />
+                        ) : (
+                          <div className="relative">
+                            <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">₹</span>
+                            <Input
+                              type="number"
+                              value={item.dis || ''}
+                              onChange={(e) => {
+                                const value = parseFloat(e.target.value) || 0;
+                                updateItem(index, 'dis', value);
+                              }}
+                              placeholder="0"
+                              className="w-full max-w-14 pl-6"
+                            />
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Select value={String(item.taxPercent)} onValueChange={(v) => updateItem(index, 'taxPercent', parseFloat(v))}>
@@ -1234,21 +1421,29 @@ const PurchaseOrders = () => {
                         </Select>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          value={item.price || ''}
-                          onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
-                          className="w-full max-w-16"
-                        />
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">₹</span>
+                          <Input
+                            type="number"
+                            value={item.price || ''}
+                            onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
+                            className="w-full max-w-16 pl-6"
+                            placeholder="0"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell className="font-medium">₹{Math.round(item.total)}</TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          value={item.mrp || ''}
-                          onChange={(e) => updateItem(index, 'mrp', parseFloat(e.target.value) || 0)}
-                          className="w-full max-w-16"
-                        />
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">₹</span>
+                          <Input
+                            type="number"
+                            value={item.mrp || ''}
+                            onChange={(e) => updateItem(index, 'mrp', parseFloat(e.target.value) || 0)}
+                            className="w-full max-w-16 pl-6"
+                            placeholder="0"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Button

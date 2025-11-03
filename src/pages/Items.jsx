@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/Modal";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,7 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { itemsAPI, categoriesAPI, billsAPI, barcodesAPI } from "@/services/api";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { itemsAPI, categoriesAPI, billsAPI, barcodesAPI, customerCreditsAPI } from "@/services/api";
 import BarcodeLabel from "@/components/BarcodeLabel";
 import BillModal from "@/components/BillModal";
 
@@ -41,6 +43,14 @@ export default function Items() {
   const [billData, setBillData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isCreditDialogOpen, setIsCreditDialogOpen] = useState(false);
+  const [customerData, setCustomerData] = useState({
+    customerName: '',
+    customerPhone: '',
+    customerAddress: '',
+    initialPayment: 0,
+    notes: ''
+  });
   const [lowStockItems, setLowStockItems] = useState([]);
   const [noMovementItems, setNoMovementItems] = useState([]);
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -280,6 +290,7 @@ export default function Items() {
     setEditingItem(null);
     setFormData({ 
       isActive: true,
+      isBOGO: false,
       stock: 0,
       minStock: 0,
       unit: "kg" // Default unit
@@ -309,6 +320,7 @@ export default function Items() {
       isActive: item.isActive,
       isDigital: item.isDigital || false,
       requiresPrescription: item.requiresPrescription || false,
+      isBOGO: item.isBOGO || false,
       expiryDate: item.expiryDate || ""
     });
     setItemImages(item.images || []);
@@ -477,10 +489,21 @@ export default function Items() {
         minStock: parseInt(formData.minStock)
       };
 
+    // Ensure isBOGO is explicitly included (boolean false should be sent)
+    if (formData.isBOGO !== undefined) {
+      submitData.isBOGO = formData.isBOGO;
+    }
+
     // Remove undefined values to avoid sending null to backend
+    // Keep false boolean values (like isBOGO: false)
     const cleanedSubmitData = Object.fromEntries(
       Object.entries(submitData).filter(([_, value]) => value !== undefined && value !== null)
     );
+    
+    // Explicitly ensure boolean fields are included even if false
+    if (formData.isBOGO !== undefined) {
+      cleanedSubmitData.isBOGO = formData.isBOGO;
+    }
 
     // Additional validation before sending
     if (!cleanedSubmitData.name || !cleanedSubmitData.sku || !cleanedSubmitData.subcategory || !cleanedSubmitData.price || !cleanedSubmitData.unit) {
@@ -512,6 +535,7 @@ export default function Items() {
       if (editingItem) {
         console.log('Updating item with ID:', editingItem._id);
         console.log('Editing item object:', editingItem);
+        console.log('Submitting isBOGO value:', cleanedSubmitData.isBOGO);
         await itemsAPI.updateItem(editingItem._id, cleanedSubmitData);
         toast({
           title: "Item Updated",
@@ -524,6 +548,8 @@ export default function Items() {
           description: "New item has been added to inventory",
         });
       }
+      
+      // Reload items to reflect changes (especially for BOGO badge)
       await loadItems();
       setIsModalOpen(false);
     } catch (error) {
@@ -581,18 +607,38 @@ export default function Items() {
     const existingItem = cart.find(cartItem => cartItem.sku === item.sku);
     
     if (existingItem) {
-      setCart(cart.map(cartItem =>
-        cartItem.sku === item.sku
-          ? { ...cartItem, quantity: cartItem.quantity + 1 }
-          : cartItem
-      ));
+      setCart(cart.map(cartItem => {
+        if (cartItem.sku === item.sku) {
+          // If BOGO is enabled on the existing item, increment by 2 (each BOGO = 2 items)
+          if (cartItem.isBOGO) {
+            return { ...cartItem, quantity: cartItem.quantity + 2 };
+          } else {
+            // Regular item or BOGO disabled - increment quantity normally
+            return { ...cartItem, quantity: cartItem.quantity + 1 };
+          }
+        }
+        return cartItem;
+      }));
     } else {
-      setCart([...cart, { ...item, quantity: 1 }]);
+      // Set default quantity to 2 if item has BOGO offer, otherwise 1
+      const defaultQuantity = item.isBOGO ? 2 : 1;
+      // Store original price for BOGO items
+      const cartItem = {
+        ...item,
+        quantity: defaultQuantity,
+        isBOGO: item.isBOGO || false,
+        originalPrice: item.isBOGO ? item.price : undefined
+      };
+      // If BOGO, keep quantity 2 and apply half price
+      if (item.isBOGO) {
+        cartItem.price = item.price / 2;
+      }
+      setCart([...cart, cartItem]);
     }
     
     toast({
       title: "Added to Cart",
-      description: `${item.name} has been added to your cart`,
+      description: `${item.name} has been added to your cart${item.isBOGO ? ' (BOGO - Qty: 2, Half Price)' : ''}`,
     });
   };
 
@@ -610,11 +656,51 @@ export default function Items() {
       return;
     }
     
-    setCart(cart.map(item =>
-      item._id === itemId
-        ? { ...item, quantity: newQuantity }
-        : item
-    ));
+    setCart(cart.map(item => {
+      if (item._id === itemId) {
+        // For BOGO items, ensure quantity is at least 2 and even (or allow any >= 2)
+        if (item.isBOGO && newQuantity < 2) {
+          return { ...item, quantity: 2 };
+        }
+        return { ...item, quantity: newQuantity };
+      }
+      return item;
+    }));
+  };
+
+  const handleBOGOToggle = (itemId) => {
+    setCart(cart.map(item => {
+      if (item._id === itemId) {
+        const isBOGO = !item.isBOGO;
+        if (isBOGO) {
+          // Enable BOGO: keep current quantity, half the price
+          const originalPrice = item.originalPrice || item.price;
+          return {
+            ...item,
+            isBOGO: true,
+            originalPrice: originalPrice, // Store original price
+            price: originalPrice / 2
+          };
+        } else {
+          // Disable BOGO: reduce quantity by half, restore full price
+          const originalPrice = item.originalPrice || (item.price * 2);
+          const itemFromDB = items.find(i => i.sku === item.sku);
+          const dbPrice = itemFromDB?.price || originalPrice;
+          
+          // Reduce quantity by half (rounded down, minimum 1)
+          const newQuantity = Math.max(1, Math.floor(item.quantity / 2));
+          
+          return {
+            ...item,
+            isBOGO: false,
+            quantity: newQuantity,
+            price: dbPrice, // Restore original price from DB (full price)
+            originalPrice: undefined
+          };
+        }
+      }
+      return item;
+    }));
   };
 
   const getTotalPrice = () => {
@@ -776,6 +862,154 @@ export default function Items() {
       title: "QR Code Generated",
       description: "Scan the QR code to complete payment",
     });
+  };
+
+  const handleCustomerCredit = async () => {
+    try {
+      if (!customerData.customerName || customerData.customerName.trim() === '') {
+        toast({
+          title: "Customer Name Required",
+          description: "Please enter customer name",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      if (!customerData.customerPhone || customerData.customerPhone.trim() === '') {
+        toast({
+          title: "Customer Phone Required",
+          description: "Please enter customer phone number",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      setSaving(true);
+      
+      // First create the bill
+      const billNumber = Math.floor(Math.random() * 1000) + 1;
+      const subtotal = getSubtotal();
+      const totalAmount = getTotalPrice();
+      const totalQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+      
+      const totalSavings = cart.reduce((sum, item) => {
+        const mrp = item.price * 1.1;
+        return sum + (mrp - item.price) * item.quantity;
+      }, 0);
+
+      const billData = {
+        billNumber: billNumber.toString(),
+        counterNumber: 1,
+        customerName: customerData.customerName,
+        billBy: user?.fullName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Unknown',
+        items: cart.map(item => ({
+          itemSku: item.sku,
+          itemName: item.name,
+          mrp: item.price * 1.1,
+          saleRate: item.price,
+          quantity: item.quantity,
+          netAmount: item.price * item.quantity
+        })),
+        subtotal: subtotal,
+        discountAmount: discountAmount,
+        totalAmount: totalAmount,
+        totalQuantity: totalQty,
+        totalSavings: totalSavings,
+        amountPaid: customerData.initialPayment || 0,
+        amountReturned: 0,
+        gstBreakdown: [
+          { basic: totalAmount * 0.6, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 },
+          { basic: totalAmount * 0.25, cgstPercent: 12.50, cgstAmount: totalAmount * 0.025, sgstPercent: 12.50, sgstAmount: totalAmount * 0.025 },
+          { basic: totalAmount * 0.15, cgstPercent: 12.00, cgstAmount: totalAmount * 0.018, sgstPercent: 12.00, sgstAmount: totalAmount * 0.018 },
+          { basic: 0.00, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 }
+        ],
+        paymentMethod: 'credit'
+      };
+
+      // Save bill to database
+      const billResponse = await billsAPI.createBill(billData);
+      
+      // Create customer credit
+      await customerCreditsAPI.createCustomerCredit(
+        billResponse.data._id,
+        {
+          customerName: customerData.customerName,
+          customerPhone: customerData.customerPhone,
+          customerAddress: customerData.customerAddress
+        },
+        customerData.initialPayment || 0,
+        customerData.notes
+      );
+      
+      // Create display data for modal
+      const displayData = {
+        storeName: selectedStore?.name || "Murugan Super Market",
+        address: selectedStore?.address ? `${selectedStore.address.street || ''}, ${selectedStore.address.city || ''} - ${selectedStore.address.zipCode || ''}`.replace(/^,\s*|,\s*$/g, '') : "No.25, Loop Road, Acharapakkam - 603301",
+        phone: selectedStore?.phone ? `Ph: ${selectedStore.phone}` : "Ph: 044-27522026",
+        gstNumber: selectedStore?.gstNumber ? `GST No.: ${selectedStore.gstNumber}` : "GST No.: 33AWOPD0029J1ZS",
+        date: new Date().toLocaleDateString('en-GB', { 
+          day: '2-digit', 
+          month: 'short', 
+          year: 'numeric' 
+        }).replace(/ /g, '-'),
+        time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit' }),
+        billNumber: billNumber,
+        counterNumber: 1,
+        customerName: customerData.customerName,
+        billBy: user?.fullName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Unknown',
+        items: cart.map(item => ({
+          name: item.name,
+          mrp: (item.price * 1.1).toFixed(2),
+          saleRate: item.price.toFixed(2),
+          qty: item.quantity,
+          netAmount: (item.price * item.quantity).toFixed(2)
+        })),
+        subtotal: subtotal.toFixed(2),
+        discountAmount: discountAmount.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        gstBreakdown: [
+          { basic: totalAmount * 0.6, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 },
+          { basic: totalAmount * 0.25, cgstPercent: 12.50, cgstAmount: totalAmount * 0.025, sgstPercent: 12.50, sgstAmount: totalAmount * 0.025 },
+          { basic: totalAmount * 0.15, cgstPercent: 12.00, cgstAmount: totalAmount * 0.018, sgstPercent: 12.00, sgstAmount: totalAmount * 0.018 },
+          { basic: 0.00, cgstPercent: 0.00, cgstAmount: 0.00, sgstPercent: 0.00, sgstAmount: 0.00 }
+        ]
+      };
+      
+      // Set bill data and show modal
+      setBillData(displayData);
+      setIsBillModalOpen(true);
+      setIsBillingOpen(false);
+      setIsCreditDialogOpen(false);
+      
+      // Reset customer data
+      setCustomerData({
+        customerName: '',
+        customerPhone: '',
+        customerAddress: '',
+        initialPayment: 0,
+        notes: ''
+      });
+      
+      // Reload items to reflect updated stock
+      await loadItems();
+      await loadLowStockItems();
+      await loadNoMovementItems();
+      
+      toast({
+        title: "Credit Created Successfully",
+        description: `Bill #${billNumber} saved as credit for ${customerData.customerName}`,
+      });
+      
+    } catch (error) {
+      console.error("Error creating customer credit:", error);
+      toast({
+        title: "Error Creating Credit",
+        description: error.response?.data?.message || error.message || "Failed to create credit",
+        variant: "destructive"
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const printBill = (billData) => {
@@ -1069,19 +1303,37 @@ export default function Items() {
         return;
       }
 
-      // Add item to cart with quantity 1 (default quantity as requested)
+      // Add item to cart - quantity 2 for BOGO items, 1 for others
       const existingItem = cart.find(cartItem => cartItem.sku === itemData.sku);
       
       if (existingItem) {
-        // Item already in cart, increment quantity
-        setCart(cart.map(cartItem =>
-          cartItem.sku === itemData.sku
-            ? { ...cartItem, quantity: cartItem.quantity + 1 }
-            : cartItem
-        ));
+        // Item already in cart
+        setCart(cart.map(cartItem => {
+          if (cartItem.sku === itemData.sku) {
+            // If BOGO is enabled on the existing item, increment by 2 (each BOGO = 2 items)
+            if (cartItem.isBOGO) {
+              return { ...cartItem, quantity: cartItem.quantity + 2 };
+            } else {
+              // Regular item or BOGO disabled - increment quantity normally
+              return { ...cartItem, quantity: cartItem.quantity + 1 };
+            }
+          }
+          return cartItem;
+        }));
       } else {
-        // Item not in cart, add with quantity 1
-        setCart([...cart, { ...itemData, quantity: 1 }]);
+        // Item not in cart, add with default quantity (2 for BOGO, 1 for others)
+        const defaultQuantity = itemData.isBOGO ? 2 : 1;
+        const cartItem = {
+          ...itemData,
+          quantity: defaultQuantity,
+          isBOGO: itemData.isBOGO || false,
+          originalPrice: itemData.isBOGO ? itemData.price : undefined
+        };
+        // If BOGO, apply half price but keep quantity 2
+        if (itemData.isBOGO) {
+          cartItem.price = itemData.price / 2;
+        }
+        setCart([...cart, cartItem]);
       }
 
       // Persist last scanned data for on-screen display
@@ -1183,11 +1435,18 @@ export default function Items() {
               <div className="flex-1 min-w-0">
                 <CardTitle className="text-sm md:text-lg truncate">{item.name}</CardTitle>
                 <p className="text-xs md:text-sm text-muted-foreground truncate">{item.sku}</p>
-                {!item.isActive && (
-                  <Badge variant="secondary" className="mt-1 bg-gray-100 text-gray-600 text-xs">
-                    Inactive
-                  </Badge>
-                )}
+                <div className="flex items-center gap-1 mt-1 flex-wrap">
+                  {!item.isActive && (
+                    <Badge variant="secondary" className="bg-gray-100 text-gray-600 text-xs">
+                      Inactive
+                    </Badge>
+                  )}
+                  {item.isBOGO && (
+                    <Badge className="bg-purple-500 hover:bg-purple-600 text-white text-xs font-bold shadow-md animate-pulse">
+                      🎁 BOGO OFFER
+                    </Badge>
+                  )}
+                </div>
               </div>
               <Badge className={`${subcategoryColor} text-xs shrink-0`}>
                 {subcategoryName}
@@ -1273,6 +1532,11 @@ export default function Items() {
                           OFFER
                         </Badge>
                       )}
+                      {item.isBOGO && (
+                        <Badge className="bg-purple-500 text-white text-xs font-bold px-2 py-0.5 animate-pulse">
+                          BOGO
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   {parseFloat(item.price) < parseFloat(item.cost) && (
@@ -1280,11 +1544,32 @@ export default function Items() {
                       Save ₹{((parseFloat(item.cost) - parseFloat(item.price)).toFixed(2))}
                     </div>
                   )}
+                  {item.isBOGO && (
+                    <div className="text-xs text-purple-700 font-semibold mt-1 flex items-center gap-1">
+                      <span>🎁</span>
+                      <span>Buy 1 Get 1 Offer Available</span>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="flex justify-between text-xs md:text-sm">
-                  <span className="font-medium">Price:</span>
-                  <span className="text-sm md:text-base font-semibold">₹{parseFloat(item.price || 0).toFixed(2)}</span>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs md:text-sm items-center">
+                    <span className="font-medium">Price:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm md:text-base font-semibold">₹{parseFloat(item.price || 0).toFixed(2)}</span>
+                      {item.isBOGO && (
+                        <Badge className="bg-purple-500 text-white text-xs font-bold px-2 py-0.5 animate-pulse">
+                          BOGO
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  {item.isBOGO && (
+                    <div className="text-xs text-purple-700 font-semibold flex items-center gap-1">
+                      <span>🎁</span>
+                      <span>Buy 1 Get 1 Offer Available</span>
+                    </div>
+                  )}
                 </div>
               )}
               <div className="flex justify-between text-xs md:text-sm">
@@ -1886,6 +2171,20 @@ export default function Items() {
             </div>
           </div>
 
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="isBOGO"
+              checked={formData.isBOGO || false}
+              onCheckedChange={(checked) => setFormData({ ...formData, isBOGO: checked })}
+            />
+            <Label
+              htmlFor="isBOGO"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+            >
+              Buy One Get One (BOGO) Offer
+            </Label>
+          </div>
+
           {/* Barcode preview and reprint */}
           {editingItem && (
             <div className="mt-2 p-3 border rounded bg-white">
@@ -2109,41 +2408,84 @@ export default function Items() {
             <>
               <div className="space-y-3 max-h-96 overflow-y-auto">
                 {cart.map((item) => (
-                  <div key={item._id} className="flex items-center gap-2 md:gap-3 p-2 md:p-3 border rounded-lg">
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-sm md:text-base truncate">{item.name}</h4>
-                      <p className="text-xs md:text-sm text-muted-foreground truncate">{item.sku}</p>
-                      <p className="text-xs md:text-sm font-semibold">₹{item.price}</p>
+                  <div key={item._id} className="flex flex-col gap-2 md:gap-3 p-2 md:p-3 border rounded-lg">
+                    <div className="flex items-center gap-2 md:gap-3">
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-sm md:text-base truncate">{item.name}</h4>
+                        <p className="text-xs md:text-sm text-muted-foreground truncate">{item.sku}</p>
+                        <p className="text-xs md:text-sm font-semibold">
+                          ₹{item.price.toFixed(2)}
+                          {item.isBOGO && (
+                            <Badge className="ml-2 bg-purple-500 text-white text-xs">BOGO</Badge>
+                          )}
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-1 md:gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (item.isBOGO) {
+                              // When BOGO enabled, decrease by 2 (minimum 2)
+                              updateQuantity(item._id, Math.max(2, item.quantity - 2));
+                            } else {
+                              // When BOGO disabled, decrease by 1 normally
+                              updateQuantity(item._id, item.quantity - 1);
+                            }
+                          }}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <span className="w-6 md:w-8 text-center text-xs md:text-sm">{item.quantity}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (item.isBOGO) {
+                              // When BOGO enabled, increase by 2
+                              updateQuantity(item._id, item.quantity + 2);
+                            } else {
+                              // When BOGO disabled, increase by 1 normally
+                              updateQuantity(item._id, item.quantity + 1);
+                            }
+                          }}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeFromCart(item._id)}
+                        className="text-destructive hover:text-destructive h-8 w-8 p-0"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
                     </div>
                     
-                    <div className="flex items-center gap-1 md:gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => updateQuantity(item._id, item.quantity - 1)}
-                        className="h-8 w-8 p-0"
-                      >
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="w-6 md:w-8 text-center text-xs md:text-sm">{item.quantity}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => updateQuantity(item._id, item.quantity + 1)}
-                        className="h-8 w-8 p-0"
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeFromCart(item._id)}
-                      className="text-destructive hover:text-destructive h-8 w-8 p-0"
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
+                    {/* BOGO Checkbox - Show only if item has BOGO offer enabled */}
+                    {(() => {
+                      const itemFromDB = items.find(i => i.sku === item.sku);
+                      return itemFromDB?.isBOGO ? (
+                        <div className="flex items-center space-x-2 pt-2 border-t">
+                          <Checkbox
+                            id={`bogo-${item._id}`}
+                            checked={item.isBOGO || false}
+                            onCheckedChange={() => handleBOGOToggle(item._id)}
+                          />
+                          <Label
+                            htmlFor={`bogo-${item._id}`}
+                            className="text-xs md:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            Buy One Get One (Apply BOGO Offer)
+                          </Label>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                 ))}
               </div>
@@ -2270,6 +2612,18 @@ export default function Items() {
                 <div className="text-xs md:text-sm opacity-90">QR code generation</div>
               </div>
             </Button>
+
+            {/* Credit Payment */}
+            <Button
+              onClick={() => setIsCreditDialogOpen(true)}
+              className="w-full h-12 md:h-16 bg-orange-600 hover:bg-orange-700 text-white flex items-center justify-center gap-2 md:gap-3"
+            >
+              <CreditCard className="h-5 w-5 md:h-6 md:w-6" />
+              <div className="text-left">
+                <div className="font-semibold text-sm md:text-base">Credit</div>
+                <div className="text-xs md:text-sm opacity-90">Save as customer credit</div>
+              </div>
+            </Button>
           </div>
 
           {/* Back Button */}
@@ -2283,6 +2637,126 @@ export default function Items() {
           </Button>
         </div>
       </Modal>
+
+      {/* Credit Dialog */}
+      <Dialog open={isCreditDialogOpen} onOpenChange={setIsCreditDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create Customer Credit</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="customerName">Customer Name *</Label>
+              <Input
+                id="customerName"
+                value={customerData.customerName}
+                onChange={(e) => setCustomerData({...customerData, customerName: e.target.value})}
+                placeholder="Enter customer name"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customerPhone">Phone *</Label>
+              <Input
+                id="customerPhone"
+                value={customerData.customerPhone}
+                onChange={(e) => setCustomerData({...customerData, customerPhone: e.target.value})}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && customerData.customerPhone && customerData.customerPhone.trim() !== '') {
+                    e.preventDefault();
+                    try {
+                      const response = await customerCreditsAPI.getCustomerByPhone(customerData.customerPhone.trim());
+                      if (response.success && response.data) {
+                        setCustomerData({
+                          ...customerData,
+                          customerName: response.data.customerName || customerData.customerName,
+                          customerAddress: response.data.customerAddress || customerData.customerAddress
+                        });
+                        toast({
+                          title: "Customer Found",
+                          description: `Found customer: ${response.data.customerName}. ${response.data.totalBalanceAmount > 0 ? `Outstanding balance: ₹${Math.round(response.data.totalBalanceAmount)}` : 'No outstanding balance'}`,
+                        });
+                      }
+                    } catch (error) {
+                      // Customer not found is not an error - just means new customer
+                      if (error.response?.status !== 404) {
+                        console.error("Error fetching customer:", error);
+                      }
+                    }
+                  }
+                }}
+                placeholder="Enter phone number and press Enter to fetch details"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customerAddress">Address</Label>
+              <Input
+                id="customerAddress"
+                value={customerData.customerAddress}
+                onChange={(e) => setCustomerData({...customerData, customerAddress: e.target.value})}
+                placeholder="Enter customer address"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="initialPayment">Initial Payment (₹)</Label>
+              <div className="relative">
+                <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">₹</span>
+                <Input
+                  id="initialPayment"
+                  type="number"
+                  step="1"
+                  min="0"
+                  max={getTotalPrice()}
+                  value={customerData.initialPayment}
+                  onChange={(e) => {
+                    const value = parseFloat(e.target.value) || 0;
+                    if (value > getTotalPrice()) {
+                      toast({
+                        title: "Invalid Amount",
+                        description: `Initial payment cannot exceed total amount of ₹${Math.round(getTotalPrice())}`,
+                        variant: "destructive"
+                      });
+                      return;
+                    }
+                    setCustomerData({...customerData, initialPayment: value});
+                  }}
+                  placeholder="0"
+                  className="pl-6"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Total Amount: ₹{Math.round(getTotalPrice())} | Balance: ₹{Math.round(getTotalPrice() - (customerData.initialPayment || 0))}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="creditNotes">Notes</Label>
+              <Input
+                id="creditNotes"
+                value={customerData.notes}
+                onChange={(e) => setCustomerData({...customerData, notes: e.target.value})}
+                placeholder="Additional notes (optional)"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsCreditDialogOpen(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCustomerCredit}
+              disabled={saving || !customerData.customerName || customerData.customerName.trim() === '' || !customerData.customerPhone || customerData.customerPhone.trim() === ''}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              {saving ? 'Creating...' : 'Create Credit'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Bill Modal */}
       <BillModal 
