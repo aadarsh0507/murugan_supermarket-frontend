@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Search, X, Save, ShoppingCart, Check, Scale, Tag, Percent, Receipt } from "lucide-react";
+import { Plus, Search, X, Save, ShoppingCart, Check, Scale, Tag, Percent, Receipt, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +47,8 @@ const PurchaseOrders = () => {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [barcodeData, setBarcodeData] = useState(null);
   const [currentPOId, setCurrentPOId] = useState(null);
+  const [highlightedRowIndex, setHighlightedRowIndex] = useState(null);
+  const [barcodeScannerValue, setBarcodeScannerValue] = useState('');
 
   const [formData, setFormData] = useState({
     supplier: "",
@@ -219,10 +221,12 @@ const PurchaseOrders = () => {
   };
 
   const removeItem = (index) => {
+    const newItems = formData.items.filter((_, i) => i !== index);
     setFormData({
       ...formData,
-      items: formData.items.filter((_, i) => i !== index)
+      items: newItems
     });
+    calculateTotals(newItems);
   };
 
   const updateItem = (index, field, value) => {
@@ -265,24 +269,127 @@ const PurchaseOrders = () => {
   };
 
   const searchItems = async (index, term) => {
-    // Update field first
-    updateItem(index, 'particulars', term);
+    const trimmedTerm = term.trim();
+    const isLikelyBarcode = trimmedTerm.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedTerm);
+    
+    // Check if current row already has an item - if so and scanning new barcode, we'll create new row
+    const currentItem = formData.items[index];
+    const currentRowHasItem = currentItem && currentItem.itemId;
+    
+    // If row has item and scanning a new barcode, create new row first (don't update current field)
+    let targetIndex = index;
+    if (currentRowHasItem && isLikelyBarcode) {
+      // Check if this is the same item being scanned again (compare with current SKU)
+      const isSameItem = currentItem.sku && (currentItem.sku.toUpperCase() === trimmedTerm.toUpperCase());
+      
+      // If different item, create new row before searching
+      if (!isSameItem) {
+        // Store the original row's item name
+        const originalItemName = currentItem.particulars || '';
+        
+        // Immediately restore the original row's item name to prevent concatenation
+        // Do this synchronously before creating new row
+        const currentItems = [...formData.items];
+        currentItems[index] = {
+          ...currentItems[index],
+          particulars: originalItemName
+        };
+        
+        // Add a new empty row with the scanned barcode
+        const newItem = { 
+          particulars: trimmedTerm, // Set the barcode in the new row
+          sku: "",
+          unit: "",
+          itemId: "",
+          categoryName: "",
+          subcategoryName: "",
+          batchNumber: "",
+          hsnNumber: "",
+          expiryDate: "",
+          poQty: 0, 
+          discountType: '%',
+          disPercent: 0, 
+          dis: 0, 
+          taxPercent: 0, 
+          price: 0, 
+          total: 0, 
+          mrp: 0 
+        };
+        currentItems.push(newItem);
+        targetIndex = currentItems.length - 1;
+        
+        // Update state with both changes at once
+        setFormData({ ...formData, items: currentItems });
+      } else {
+        // Same item scanned - restore the item name and don't do anything else
+        if (currentItem.particulars !== term && currentItem.particulars) {
+          const currentItems = [...formData.items];
+          currentItems[index] = {
+            ...currentItems[index],
+            particulars: currentItem.particulars
+          };
+          setFormData({ ...formData, items: currentItems });
+        }
+        return;
+      }
+    } else {
+      // Update field first for regular search (only if row doesn't have an item or it's not a barcode)
+      updateItem(index, 'particulars', term);
+    }
+    
     if (!term || term.length < 2) {
-      setItemSuggestions(prev => ({ ...prev, [index]: [] }));
+      setItemSuggestions(prev => ({ ...prev, [targetIndex]: [] }));
       setOpenSuggestIndex(null);
       return;
     }
-    // Filter from preloaded items (from Categories)
-    const lower = term.toLowerCase();
+    
+    // If it's a barcode scan, try to find exact SKU match and auto-select
+    if (isLikelyBarcode) {
+      const exactSkuMatch = allItems.find(i => 
+        (i.sku || '').toUpperCase() === trimmedTerm.toUpperCase()
+      );
+      
+      if (exactSkuMatch) {
+        // Found exact SKU match - auto-select it in the target row
+        setItemSuggestions(prev => ({ ...prev, [targetIndex]: [exactSkuMatch] }));
+        setOpenSuggestIndex(targetIndex);
+        chooseSuggestion(targetIndex, exactSkuMatch);
+        return;
+      }
+    }
+    
+    // Regular search: Filter from preloaded items (from Categories)
+    const lower = trimmedTerm.toLowerCase();
     const suggestions = allItems
       .filter(i => (i.name || '').toLowerCase().includes(lower) || (i.sku || '').toLowerCase().includes(lower))
+      .sort((a, b) => {
+        // Sort exact SKU matches first for barcode scans
+        if (isLikelyBarcode) {
+          const aExact = (a.sku || '').toUpperCase() === trimmedTerm.toUpperCase();
+          const bExact = (b.sku || '').toUpperCase() === trimmedTerm.toUpperCase();
+          if (aExact && !bExact) return -1;
+          if (!aExact && bExact) return 1;
+        }
+        return 0;
+      })
       .slice(0, 20);
-    setItemSuggestions(prev => ({ ...prev, [index]: suggestions }));
-    setOpenSuggestIndex(index);
+    setItemSuggestions(prev => ({ ...prev, [targetIndex]: suggestions }));
+    setOpenSuggestIndex(targetIndex);
   };
 
   const chooseSuggestion = (index, suggestion) => {
     const items = [...formData.items];
+    const currentItem = items[index];
+    
+    // Check if this is the same item already selected
+    const isSameItem = currentItem && currentItem.itemId === suggestion._id;
+    if (isSameItem) {
+      // Same item - just keep it, don't update
+      setOpenSuggestIndex(null);
+      return;
+    }
+    
+    // Populate the target row (index is already the correct row - new row created in searchItems if needed)
     items[index] = {
       ...items[index],
       particulars: suggestion.name || suggestion.itemName || '',
@@ -299,6 +406,102 @@ const PurchaseOrders = () => {
     setFormData({ ...formData, items });
     calculateTotals(items);
     setOpenSuggestIndex(null);
+  };
+
+  // Barcode scanner handler
+  const handleBarcodeScan = async (barcode) => {
+    const trimmedBarcode = barcode.trim();
+    if (!trimmedBarcode || trimmedBarcode.length < 2) {
+      return;
+    }
+
+    const isLikelyBarcode = trimmedBarcode.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedBarcode);
+    
+    if (!isLikelyBarcode) {
+      return;
+    }
+
+    // Find item by SKU/barcode
+    const foundItem = allItems.find(i => 
+      (i.sku || '').toUpperCase() === trimmedBarcode.toUpperCase()
+    );
+
+    if (!foundItem) {
+      toast({
+        title: "Item not found",
+        description: `No item found with barcode: ${trimmedBarcode}`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check if this item already exists in the table
+    const existingRowIndex = formData.items.findIndex(
+      item => item.itemId === foundItem._id || item.sku === foundItem.sku
+    );
+
+    if (existingRowIndex !== -1) {
+      // Same item exists - highlight it
+      setHighlightedRowIndex(existingRowIndex);
+      // Remove highlight after 2 seconds
+      setTimeout(() => {
+        setHighlightedRowIndex(null);
+      }, 2000);
+      
+      // Scroll to the highlighted row
+      const rowElement = document.querySelector(`[data-row-index="${existingRowIndex}"]`);
+      if (rowElement) {
+        rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      
+      toast({
+        title: "Item already exists",
+        description: "Item is already in the table (highlighted)",
+      });
+    } else {
+      // Different item - add to new row
+      const lastRowIndex = formData.items.length - 1;
+      const lastItem = formData.items[lastRowIndex];
+      
+      // Check if last row is empty or has an item
+      let targetIndex = lastRowIndex;
+      if (lastItem && lastItem.itemId) {
+        // Last row has item, create new row
+        const newItem = {
+          particulars: "",
+          sku: "",
+          unit: "",
+          itemId: "",
+          categoryName: "",
+          subcategoryName: "",
+          batchNumber: "",
+          hsnNumber: "",
+          expiryDate: "",
+          poQty: 0,
+          discountType: '%',
+          disPercent: 0,
+          dis: 0,
+          taxPercent: 0,
+          price: 0,
+          total: 0,
+          mrp: 0
+        };
+        const newItems = [...formData.items, newItem];
+        targetIndex = newItems.length - 1;
+        setFormData({ ...formData, items: newItems });
+      }
+      
+      // Add the item to the target row
+      chooseSuggestion(targetIndex, foundItem);
+      
+      // Scroll to the new row
+      setTimeout(() => {
+        const rowElement = document.querySelector(`[data-row-index="${targetIndex}"]`);
+        if (rowElement) {
+          rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
   };
 
   const calculateTotals = (items) => {
@@ -368,15 +571,15 @@ const PurchaseOrders = () => {
     setSaving(true);
     
     try {
-      // Filter out empty items (items with no particulars or quantity 0)
+      // Filter out empty items - check for itemId (properly selected item) and quantity > 0
       const validItems = formData.items.filter(item => 
-        item.particulars && item.particulars.trim() !== "" && item.poQty > 0
+        item.itemId && item.poQty > 0
       );
 
       if (validItems.length === 0) {
         toast({ 
           title: "Error", 
-          description: "Please add at least one item with a name and quantity", 
+          description: "Please add at least one item with quantity greater than 0", 
           variant: "destructive" 
         });
         setSaving(false);
@@ -719,40 +922,109 @@ const PurchaseOrders = () => {
           <CardContent className="pt-6 overflow-visible">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-semibold">Line Items</h3>
-              <Button type="button" onClick={addItem} variant="destructive" size="sm">
-                <Plus className="h-4 w-4 mr-1" />
-                ADD ITEM
-              </Button>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Scan barcode to add item..."
+                  value={barcodeScannerValue}
+                  onChange={async (e) => {
+                    const value = e.target.value;
+                    setBarcodeScannerValue(value);
+                  }}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter' && barcodeScannerValue.trim()) {
+                      e.preventDefault();
+                      await handleBarcodeScan(barcodeScannerValue);
+                      setBarcodeScannerValue('');
+                    }
+                  }}
+                  className="w-64"
+                  autoFocus
+                />
+                <Button type="button" onClick={addItem} variant="outline" size="sm">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Manual Add
+                </Button>
+              </div>
             </div>
-            <div className="border rounded-lg overflow-visible">
-              <Table>
+            <div className="border rounded-lg overflow-hidden w-full">
+              <Table className="w-full table-fixed">
                 <TableHeader className="bg-blue-600 text-white">
                   <TableRow>
-                    <TableHead className="text-white"><input type="checkbox" /></TableHead>
-                    <TableHead className="text-white">PARTICULARS</TableHead>
-                    <TableHead className="text-white">Quantity</TableHead>
-                    <TableHead className="text-white">Batch No.</TableHead>
-                    <TableHead className="text-white">HSN</TableHead>
-                    <TableHead className="text-white">Expiry Date</TableHead>
-                    <TableHead className="text-white">Discount Type</TableHead>
-                    <TableHead className="text-white">DIS</TableHead>
-                    <TableHead className="text-white">TAX%</TableHead>
-                    <TableHead className="text-white">PRICE</TableHead>
-                    <TableHead className="text-white">TOTAL</TableHead>
-                    <TableHead className="text-white">MRP</TableHead>
+                    <TableHead className="text-white w-10"><input type="checkbox" /></TableHead>
+                    <TableHead className="text-white w-56">PARTICULARS</TableHead>
+                    <TableHead className="text-white w-16">Qty</TableHead>
+                    <TableHead className="text-white w-20">Batch No.</TableHead>
+                    <TableHead className="text-white w-16">HSN</TableHead>
+                    <TableHead className="text-white w-24">Expiry Date</TableHead>
+                    <TableHead className="text-white w-20">Disc Type</TableHead>
+                    <TableHead className="text-white w-14">DIS</TableHead>
+                    <TableHead className="text-white w-14">TAX%</TableHead>
+                    <TableHead className="text-white w-16">PRICE</TableHead>
+                    <TableHead className="text-white w-16">TOTAL</TableHead>
+                    <TableHead className="text-white w-16">MRP</TableHead>
+                    <TableHead className="text-white w-12">ACTION</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {formData.items.map((item, index) => (
-                    <TableRow key={index}>
+                    <TableRow 
+                      key={index}
+                      data-row-index={index}
+                      className={highlightedRowIndex === index ? "bg-yellow-200 animate-pulse" : ""}
+                    >
                       <TableCell><input type="checkbox" /></TableCell>
                       <TableCell className="relative overflow-visible">
-                        <div className="suggestions-dropdown relative w-60">
+                        <div className="suggestions-dropdown relative w-56">
                           <Input
                             ref={(el) => (inputRefs.current[index] = el)}
                             placeholder="Search for a Particulars"
                             value={item.particulars}
                             onChange={(e) => {
+                              let inputValue = e.target.value;
+                              const currentItem = formData.items[index];
+                              const currentRowHasItem = currentItem && currentItem.itemId;
+                              
+                              // If row already has an item, check if value is concatenated (item name + barcode)
+                              if (currentRowHasItem && currentItem.particulars) {
+                                const itemName = currentItem.particulars;
+                                // Check if inputValue starts with item name followed by digits (barcode)
+                                if (inputValue.startsWith(itemName) && inputValue.length > itemName.length) {
+                                  const afterItemName = inputValue.substring(itemName.length);
+                                  // If the part after item name looks like a barcode, extract just that
+                                  if (afterItemName.length >= 6 && /^[A-Za-z0-9\-]+$/.test(afterItemName.trim())) {
+                                    inputValue = afterItemName.trim();
+                                    // Immediately restore the item name and search with the extracted barcode
+                                    const currentItems = [...formData.items];
+                                    currentItems[index] = {
+                                      ...currentItems[index],
+                                      particulars: itemName
+                                    };
+                                    setFormData({ ...formData, items: currentItems });
+                                  }
+                                }
+                              }
+                              
+                              // Check if this looks like a barcode scan
+                              const isLikelyBarcode = inputValue.length >= 6 && /^[A-Za-z0-9\-]+$/.test(inputValue.trim());
+                              
+                              // If row already has an item and scanning a new barcode, handle it specially
+                              if (currentRowHasItem && isLikelyBarcode) {
+                                // Check if this is the same item's barcode
+                                const isSameItem = currentItem.sku && (currentItem.sku.toUpperCase() === inputValue.trim().toUpperCase());
+                                
+                                if (isSameItem) {
+                                  // Same item - restore item name and don't do anything else
+                                  const currentItems = [...formData.items];
+                                  currentItems[index] = {
+                                    ...currentItems[index],
+                                    particulars: currentItem.particulars
+                                  };
+                                  setFormData({ ...formData, items: currentItems });
+                                  return;
+                                }
+                                // Different item - continue to searchItems which will create new row
+                              }
+                              
                               const inputEl = inputRefs.current[index];
                               if (inputEl) {
                                 const rect = inputEl.getBoundingClientRect();
@@ -761,7 +1033,70 @@ const PurchaseOrders = () => {
                                   left: rect.left + window.scrollX
                                 });
                               }
-                              searchItems(index, e.target.value);
+                              searchItems(index, inputValue);
+                            }}
+                            onKeyDown={(e) => {
+                              // Handle Enter key for barcode scanners
+                              if (e.key === 'Enter' && item.particulars.trim()) {
+                                e.preventDefault();
+                                let trimmedParticulars = item.particulars.trim();
+                                const currentItem = formData.items[index];
+                                const currentRowHasItem = currentItem && currentItem.itemId;
+                                
+                                // If row has item, check for concatenation (item name + barcode)
+                                if (currentRowHasItem && currentItem.particulars) {
+                                  const itemName = currentItem.particulars;
+                                  if (trimmedParticulars.startsWith(itemName) && trimmedParticulars.length > itemName.length) {
+                                    const afterItemName = trimmedParticulars.substring(itemName.length);
+                                    if (afterItemName.length >= 6 && /^[A-Za-z0-9\-]+$/.test(afterItemName.trim())) {
+                                      trimmedParticulars = afterItemName.trim();
+                                      // Restore item name
+                                      const currentItems = [...formData.items];
+                                      currentItems[index] = {
+                                        ...currentItems[index],
+                                        particulars: itemName
+                                      };
+                                      setFormData({ ...formData, items: currentItems });
+                                    }
+                                  }
+                                }
+                                
+                                const isLikelyBarcode = trimmedParticulars.length >= 6 && /^[A-Za-z0-9\-]+$/.test(trimmedParticulars);
+                                
+                                // Check if row has item and scanning different barcode - use the last created row index
+                                let targetIndex = index;
+                                if (currentRowHasItem && isLikelyBarcode) {
+                                  const isSameItem = currentItem.sku && (currentItem.sku.toUpperCase() === trimmedParticulars.toUpperCase());
+                                  if (!isSameItem) {
+                                    // Different item - find the last empty row or newly created row
+                                    const lastItem = formData.items[formData.items.length - 1];
+                                    if (!lastItem.itemId && lastItem.particulars === trimmedParticulars) {
+                                      targetIndex = formData.items.length - 1;
+                                    }
+                                  } else {
+                                    // Same item - don't process
+                                    return;
+                                  }
+                                }
+                                
+                                // If there's exactly one suggestion, auto-select it
+                                if (itemSuggestions[targetIndex]?.length === 1) {
+                                  chooseSuggestion(targetIndex, itemSuggestions[targetIndex][0]);
+                                  return;
+                                }
+                                
+                                // If it's a barcode scan, try to find exact SKU match
+                                if (isLikelyBarcode) {
+                                  const exactSkuMatch = allItems.find(i => 
+                                    (i.sku || '').toUpperCase() === trimmedParticulars.toUpperCase()
+                                  );
+                                  
+                                  if (exactSkuMatch) {
+                                    chooseSuggestion(targetIndex, exactSkuMatch);
+                                    return;
+                                  }
+                                }
+                              }
                             }}
                             onFocus={() => {
                               const inputEl = inputRefs.current[index];
@@ -774,7 +1109,7 @@ const PurchaseOrders = () => {
                               }
                               setOpenSuggestIndex(index);
                             }}
-                            className="w-full"
+                            className="w-56"
                           />
                           {openSuggestIndex === index && (itemSuggestions[index]?.length || 0) > 0 && (
                             <div className="suggestions-dropdown fixed z-50 w-96 max-h-64 overflow-auto rounded-md border bg-white p-1 shadow-lg"
@@ -804,7 +1139,7 @@ const PurchaseOrders = () => {
                           type="number"
                           value={item.poQty || ''}
                           onChange={(e) => updateItem(index, 'poQty', parseFloat(e.target.value) || 0)}
-                          className="w-20"
+                          className="w-full max-w-16"
                         />
                       </TableCell>
                       <TableCell>
@@ -813,7 +1148,7 @@ const PurchaseOrders = () => {
                           value={item.batchNumber || ''}
                           onChange={(e) => updateItem(index, 'batchNumber', e.target.value)}
                           placeholder="Batch No."
-                          className="w-24"
+                          className="w-full max-w-20"
                         />
                       </TableCell>
                       <TableCell>
@@ -822,24 +1157,20 @@ const PurchaseOrders = () => {
                           value={item.hsnNumber || ''}
                           onChange={(e) => updateItem(index, 'hsnNumber', e.target.value)}
                           placeholder="HSN Code"
-                          className="w-24"
+                          className="w-full max-w-16"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="relative">
                         <Popover>
                           <PopoverTrigger asChild>
                             <Button
                               variant="outline"
-                              className={`w-32 justify-start text-left font-normal ${
-                                !item.expiryDate && "text-muted-foreground"
+                              className={`w-full max-w-24 justify-start text-left font-normal ${
+                                !item.expiryDate ? "text-muted-foreground" : ""
                               }`}
                             >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {item.expiryDate ? (
-                                format(new Date(item.expiryDate), "dd-MM-yyyy")
-                              ) : (
-                                <span>dd-mm-yyyy</span>
-                              )}
+                              <CalendarIcon className={`mr-2 h-4 w-4 ${!item.expiryDate ? "opacity-50" : ""}`} />
+                              {item.expiryDate && format(new Date(item.expiryDate), "dd-MM-yyyy")}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent className="w-[300px] p-0 max-h-none" align="start" sideOffset={4} collisionPadding={10}>
@@ -863,7 +1194,7 @@ const PurchaseOrders = () => {
                           value={item.discountType || '%'} 
                           onValueChange={(v) => updateItem(index, 'discountType', v)}
                         >
-                          <SelectTrigger className="w-24">
+                          <SelectTrigger className="w-full max-w-20">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -885,12 +1216,12 @@ const PurchaseOrders = () => {
                             }
                           }}
                           placeholder={item.discountType === '%' ? "%" : "Amount"}
-                          className="w-20"
+                          className="w-full max-w-14"
                         />
                       </TableCell>
                       <TableCell>
                         <Select value={String(item.taxPercent)} onValueChange={(v) => updateItem(index, 'taxPercent', parseFloat(v))}>
-                          <SelectTrigger className="w-20">
+                          <SelectTrigger className="w-full max-w-14">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -907,7 +1238,7 @@ const PurchaseOrders = () => {
                           type="number"
                           value={item.price || ''}
                           onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
-                          className="w-24"
+                          className="w-full max-w-16"
                         />
                       </TableCell>
                       <TableCell className="font-medium">₹{Math.round(item.total)}</TableCell>
@@ -916,8 +1247,19 @@ const PurchaseOrders = () => {
                           type="number"
                           value={item.mrp || ''}
                           onChange={(e) => updateItem(index, 'mrp', parseFloat(e.target.value) || 0)}
-                          className="w-24"
+                          className="w-full max-w-16"
                         />
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => removeItem(index)}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
