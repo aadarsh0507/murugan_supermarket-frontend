@@ -141,44 +141,60 @@ export default function Items() {
         limit: 100 
       });
       
+      console.log("Categories API response:", response);
+      console.log("Categories count:", response.data?.categories?.length || 0);
+      
       // Extract all items from embedded subcategories
       const allItems = [];
       const allSubcategories = [];
       
-      response.data.categories.forEach(category => {
-        if (category.subcategories && category.subcategories.length > 0) {
-          category.subcategories.forEach(subcategory => {
-            // Add parent category info to subcategory
-            const subcategoryWithParent = {
-              ...subcategory,
-              parentCategory: {
-                _id: category._id,
-                name: category.name
-              }
-            };
-            allSubcategories.push(subcategoryWithParent);
-            
-            // Extract items from subcategory
-            if (subcategory.items && subcategory.items.length > 0) {
-              subcategory.items.forEach(item => {
-                console.log('loadItems - Processing item:', item.name, 'Images:', item.images);
-                allItems.push({
-                  ...item,
-                  subcategory: subcategoryWithParent
+      if (response.data && response.data.categories) {
+        response.data.categories.forEach(category => {
+          console.log(`Processing category: ${category.name}, subcategories: ${category.subcategories?.length || 0}`);
+          if (category.subcategories && category.subcategories.length > 0) {
+            category.subcategories.forEach(subcategory => {
+              // Add parent category info to subcategory
+              const subcategoryWithParent = {
+                ...subcategory,
+                parentCategory: {
+                  _id: category._id,
+                  name: category.name
+                }
+              };
+              allSubcategories.push(subcategoryWithParent);
+              
+              // Extract items from subcategory
+              if (subcategory.items && subcategory.items.length > 0) {
+                console.log(`  Subcategory ${subcategory.name}: ${subcategory.items.length} items`);
+                subcategory.items.forEach(item => {
+                  allItems.push({
+                    ...item,
+                    subcategory: subcategoryWithParent
+                  });
                 });
-              });
-            }
-          });
-        }
-      });
+              } else {
+                console.log(`  Subcategory ${subcategory.name}: No items`);
+              }
+            });
+          } else {
+            console.log(`Category ${category.name}: No subcategories`);
+          }
+        });
+      } else {
+        console.warn("No categories data in response:", response);
+      }
+      
+      console.log(`Total items extracted: ${allItems.length}`);
+      console.log(`Total subcategories extracted: ${allSubcategories.length}`);
       
       setItems(allItems);
       setSubcategories(allSubcategories);
     } catch (error) {
       console.error("Error loading items:", error);
+      console.error("Error details:", error.response?.data || error.message);
       toast({
         title: "Error",
-        description: "Failed to load items",
+        description: error.response?.data?.message || "Failed to load items",
         variant: "destructive",
       });
     } finally {
