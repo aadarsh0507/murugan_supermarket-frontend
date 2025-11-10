@@ -32,17 +32,16 @@ export default function SelectStore() {
       // If user has stores assigned, filter to show only those stores
       if (user && user.stores && user.stores.length > 0) {
         // Get all active stores first
-        const response = await suppliersAPI.getStores({ isActive: true });
-        const allStores = response.data || [];
-        
+        const allStores = await suppliersAPI.getStores({ isActive: true });
+
         // Filter to only show stores the user has access to
-        const userStoreIds = user.stores.map(store => 
-          typeof store === 'object' ? store._id : store
+        const userStoreIds = user.stores.map(store =>
+          typeof store === 'object' ? (store.id ?? store._id) : store
         );
-        const accessibleStores = allStores.filter(store => 
-          userStoreIds.includes(store._id)
+        const accessibleStores = allStores.filter(store =>
+          userStoreIds.includes(store.id ?? store._id)
         );
-        
+
         setStores(accessibleStores);
       } else {
         // If user has no stores assigned or is admin, show all stores
@@ -50,8 +49,8 @@ export default function SelectStore() {
         if (user && user.role !== 'admin') {
           setStores([]);
         } else {
-          const response = await suppliersAPI.getStores({ isActive: true });
-          setStores(response.data || []);
+          const allStores = await suppliersAPI.getStores({ isActive: true });
+          setStores(allStores);
         }
       }
     } catch (error) {
@@ -71,7 +70,7 @@ export default function SelectStore() {
       const response = await usersAPI.getSelectedStore();
       if (response.data?.selectedStore) {
         setCurrentSelectedStore(response.data.selectedStore);
-        setSelectedStoreId(response.data.selectedStore._id);
+        setSelectedStoreId(response.data.selectedStore.id ?? response.data.selectedStore._id);
       }
     } catch (error) {
       console.error("Error loading selected store:", error);
@@ -82,22 +81,19 @@ export default function SelectStore() {
     setSaving(true);
     try {
       const response = await usersAPI.setSelectedStore(storeId);
-      
+
       if (response.status === 'success') {
         setCurrentSelectedStore(response.data.selectedStore);
-        
+
         // Update user context with selectedStore
         updateSelectedStore(response.data.selectedStore);
-        
+
         toast({
           title: "Success",
           description: `Store "${response.data.selectedStore.name}" has been selected`,
         });
-        
-        // Navigate to dashboard after selection
-        setTimeout(() => {
-          navigate("/dashboard");
-        }, 1000);
+
+        navigate("/dashboard", { replace: true });
       }
     } catch (error) {
       console.error("Error selecting store:", error);
@@ -144,14 +140,14 @@ export default function SelectStore() {
             <p className="text-muted-foreground">
               Choose the store you want to work with. All your data will be saved against this store.
             </p>
-            {currentSelectedStore && (
+            {/* {currentSelectedStore && (
               <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 rounded-md">
                 <p className="text-sm text-blue-700 dark:text-blue-300">
                   <Store className="inline h-4 w-4 mr-1" />
                   Currently selected: <strong>{currentSelectedStore.name}</strong>
                 </p>
               </div>
-            )}
+            )} */}
           </div>
         </motion.div>
       </div>
@@ -169,40 +165,36 @@ export default function SelectStore() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {stores.map((store) => {
-            const isSelected = currentSelectedStore?._id === store._id;
+            const storeId = store.id ?? store._id;
+            const isSelected = (currentSelectedStore?.id ?? currentSelectedStore?._id) === storeId;
             return (
               <motion.div
-                key={store._id}
+                key={storeId}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 whileHover={{ scale: 1.02 }}
                 transition={{ duration: 0.2 }}
               >
                 <Card
-                  className={`cursor-pointer transition-all ${
-                    isSelected
-                      ? "ring-2 ring-primary bg-primary/5"
-                      : "hover:border-primary/50"
-                  }`}
-                  onClick={() => !saving && handleSelectStore(store._id)}
+                  className={`cursor-pointer transition-all ${isSelected
+                    ? "ring-2 ring-primary bg-primary/5"
+                    : "hover:border-primary/50"
+                    }`}
+                  onClick={() => !saving && handleSelectStore(storeId)}
                 >
                   <CardHeader>
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div
-                          className={`p-2 rounded-lg ${
-                            isSelected
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted"
-                          }`}
+                          className={`p-2 rounded-lg ${isSelected
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted"
+                            }`}
                         >
                           <Store className="h-5 w-5" />
                         </div>
                         <div>
                           <CardTitle className="text-lg">{store.name}</CardTitle>
-                          <Badge variant="outline" className="mt-1">
-                            {store.code}
-                          </Badge>
                         </div>
                       </div>
                       {isSelected && (
@@ -214,27 +206,7 @@ export default function SelectStore() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      {store.address && (
-                        <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                          <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                          <span>
-                            {store.address.street && (
-                              <span>{store.address.street}, </span>
-                            )}
-                            {store.address.city && (
-                              <span>{store.address.city}, </span>
-                            )}
-                            {store.address.state && <span>{store.address.state}</span>}
-                            {store.address.zipCode && (
-                              <span> - {store.address.zipCode}</span>
-                            )}
-                            {!store.address.street &&
-                              !store.address.city &&
-                              !store.address.state &&
-                              "Address not provided"}
-                          </span>
-                        </div>
-                      )}
+                      {/* Address hidden per request */}
                       {store.phone && (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <Phone className="h-4 w-4" />
@@ -254,14 +226,14 @@ export default function SelectStore() {
                           disabled={saving}
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleSelectStore(store._id);
+                            handleSelectStore(storeId);
                           }}
                         >
-                          {saving && selectedStoreId === store._id
+                          {saving && selectedStoreId === storeId
                             ? "Selecting..."
                             : isSelected
-                            ? "Currently Selected"
-                            : "Select This Store"}
+                              ? "Currently Selected"
+                              : "Select This Store"}
                         </Button>
                       </div>
                     </div>

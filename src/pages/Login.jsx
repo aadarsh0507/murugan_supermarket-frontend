@@ -18,7 +18,7 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    
+
     if (!email || !password) {
       toast({
         title: "Error",
@@ -31,15 +31,15 @@ export default function Login() {
     clearError(); // Clear any previous errors
 
     const result = await login(email, password);
-    
+
     if (result.success) {
       toast({
         title: "Login Successful",
         description: `Welcome back, ${result.data.user.firstName}!`,
       });
-      
-      // Navigate to dashboard after successful login
-      navigate("/dashboard");
+
+      // Redirect to store selection after successful login
+      navigate("/select-store", { replace: true });
     } else {
       toast({
         title: "Login Failed",
@@ -69,9 +69,9 @@ export default function Login() {
         {/* Left Side - Supermarket Image */}
         <div className="hidden lg:flex lg:w-2/3 relative overflow-hidden items-center justify-center p-2">
           <div className="relative w-full h-full">
-            <img 
-              src="/loginimage.jpg" 
-              alt="Supermarket Aisle" 
+            <img
+              src="/loginimage.jpg"
+              alt="Supermarket Aisle"
               className="w-half h-half object-cover rounded-2xl border-4 border-gray-200 shadow-2xl"
             />
             <div className="absolute inset-0 rounded-2xl border-2 border-white shadow-inner"></div>
@@ -87,86 +87,86 @@ export default function Login() {
                 <h2 className="text-2xl font-bold text-center mb-6 text-gray-800">
                   Murugan Super Market
                 </h2>
-              
-              <div className="relative mb-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">Or</span>
-                </div>
-              </div>
 
-              <form onSubmit={handleLogin} className="space-y-8">
-                <div className="space-y-3">
-                  <Label htmlFor="email" className="text-gray-700 font-medium">
-                    Email
-                  </Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="pl-9 bg-blue-50 border-gray-300 focus:border-yellow-500 focus:ring-yellow-500"
-                    />
+                <div className="relative mb-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-white text-gray-500">Or</span>
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <Label htmlFor="password" className="text-gray-700 font-medium">
-                    Password
-                  </Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="pl-9 pr-9 bg-blue-50 border-gray-300 focus:border-yellow-500 focus:ring-yellow-500"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4 text-gray-400" />
-                      ) : (
-                        <Eye className="h-4 w-4 text-gray-400" />
-                      )}
-                    </Button>
+                <form onSubmit={handleLogin} className="space-y-8">
+                  <div className="space-y-3">
+                    <Label htmlFor="email" className="text-gray-700 font-medium">
+                      Email
+                    </Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        id="email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="pl-9 bg-blue-50 border-gray-300 focus:border-yellow-500 focus:ring-yellow-500"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <Button
-                  type="submit"
-                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-3 rounded-lg shadow-md transition-all duration-300"
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      LOGIN
-                    </>
-                  ) : (
-                    "LOGIN"
-                  )}
-                </Button>
+                  <div className="space-y-3">
+                    <Label htmlFor="password" className="text-gray-700 font-medium">
+                      Password
+                    </Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="pl-9 pr-9 bg-blue-50 border-gray-300 focus:border-yellow-500 focus:ring-yellow-500"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4 text-gray-400" />
+                        ) : (
+                          <Eye className="h-4 w-4 text-gray-400" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
 
-                <div className="text-center mt-4">
-                  <Link 
-                    to="/forgot-password" 
-                    className="text-blue-600 hover:text-blue-800 hover:underline text-sm font-medium transition-colors duration-200"
+                  <Button
+                    type="submit"
+                    className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-3 rounded-lg shadow-md transition-all duration-300"
+                    disabled={isLoading}
                   >
-                    Forgot Password?
-                  </Link>
-                </div>
-              </form>
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        LOGIN
+                      </>
+                    ) : (
+                      "LOGIN"
+                    )}
+                  </Button>
+
+                  <div className="text-center mt-4">
+                    <Link
+                      to="/forgot-password"
+                      className="text-blue-600 hover:text-blue-800 hover:underline text-sm font-medium transition-colors duration-200"
+                    >
+                      Forgot Password?
+                    </Link>
+                  </div>
+                </form>
               </div>
             </div>
           </div>
@@ -183,8 +183,8 @@ export default function Login() {
           <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center cursor-pointer">
             <span className="text-red-600 text-xs font-bold">g+</span>
           </div>
-          <Mail 
-            className="h-5 w-5 text-white cursor-pointer hover:text-yellow-300 transition-colors" 
+          <Mail
+            className="h-5 w-5 text-white cursor-pointer hover:text-yellow-300 transition-colors"
             onClick={handleMailClick}
             title="Send email to jprsupermarket@gmail.com"
           />

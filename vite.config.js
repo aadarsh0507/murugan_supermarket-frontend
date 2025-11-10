@@ -14,11 +14,25 @@ export default defineConfig(({ mode }) => ({
         target: 'http://localhost:5000/',
         changeOrigin: true,
         secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('⚠️  Backend server not running. Please start the backend server on port 5000.');
+            console.log('   Run: cd backend && pnpm dev');
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log(`→ ${req.method} ${req.url}`);
+          });
+        },
       },
       '/uploads': {
         target: 'http://localhost:5000/',
         changeOrigin: true,
         secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            // Silently handle upload proxy errors
+          });
+        },
       }
     }
   },

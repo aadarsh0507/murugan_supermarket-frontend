@@ -1,7 +1,7 @@
 // API configuration
-const API_BASE_URL = import.meta.env.DEV 
-  ? '/api'  // Use proxy in development
-  : (import.meta.env.VITE_API_URL || 'http://localhost:5000/api');
+// In production with Docker, use relative path to work with nginx proxy
+// In development, use relative path with vite proxy
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Helper function to get auth token from localStorage
 const getAuthToken = () => {
@@ -24,6 +24,7 @@ const apiRequest = async (endpoint, options = {}) => {
   const token = getAuthToken();
 
   const defaultOptions = {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
@@ -52,7 +53,9 @@ const apiRequest = async (endpoint, options = {}) => {
 
     return data;
   } catch (error) {
-    console.error('API Error:', error);
+    if (error.status !== 401) {
+      console.error('API Error:', error);
+    }
     throw error;
   }
 };
@@ -148,6 +151,35 @@ export const authAPI = {
   },
 };
 
+// Reference Data API
+export const referenceDataAPI = {
+  getRoles: async () => {
+    const response = await apiRequest('/roles', {
+      method: 'GET'
+    });
+
+    return (
+      response?.data?.roles ||
+      response?.roles ||
+      response?.data ||
+      []
+    );
+  },
+
+  getDepartments: async () => {
+    const response = await apiRequest('/departments', {
+      method: 'GET'
+    });
+
+    return (
+      response?.data?.departments ||
+      response?.departments ||
+      response?.data ||
+      []
+    );
+  }
+};
+
 // Users API
 export const usersAPI = {
   // Get all users
@@ -212,8 +244,11 @@ export const usersAPI = {
 };
 
 // Categories API
+// Note: Categories now return itemsCount, inStockCount, lowStockCount, expiringSoonCount
+// Items are no longer embedded - use itemsAPI.getItems() with categoryId/subcategoryId filters
 export const categoriesAPI = {
-  // Get all categories
+  // Get all categories (returns itemsCount, not embedded items)
+  // Params: { page, limit, search, isActive, sortBy, sortOrder, store }
   getCategories: async (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
     const endpoint = queryString ? `/categories?${queryString}` : '/categories';
@@ -255,7 +290,7 @@ export const categoriesAPI = {
     });
   },
 
-  // Get subcategories of a specific category
+  // Get subcategories of a specific category (returns itemsCount, not embedded items)
   getSubcategories: async (categoryId) => {
     return await apiRequest(`/categories/${categoryId}/subcategories`);
   },
@@ -278,25 +313,41 @@ export const categoriesAPI = {
     });
   },
 
-  // Add item to subcategory
+  // Add item to subcategory (now uses items endpoint directly)
+  // Note: itemData should include categoryId and subcategoryId
   addItemToSubcategory: async (categoryId, subcategoryId, itemData) => {
-    return await apiRequest(`/categories/${categoryId}/subcategories/${subcategoryId}/items`, {
+    // Include category and subcategory references in item data
+    const itemDataWithRefs = {
+      ...itemData,
+      categoryId,
+      subcategoryId
+    };
+    return await apiRequest('/items', {
       method: 'POST',
-      body: JSON.stringify(itemData),
+      body: JSON.stringify(itemDataWithRefs),
     });
   },
 };
 
 // Items API
 export const itemsAPI = {
-  // Get all items
+  // Get all items (cursor-based pagination)
+  // Params: { cursor, limit, q, store, categoryId, subcategoryId, isActive, sort, sortOrder }
   getItems: async (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
     const endpoint = queryString ? `/items?${queryString}` : '/items';
     return await apiRequest(endpoint);
   },
 
-  // Get single item
+  // Get items count with filters
+  // Params: { store, categoryId, subcategoryId, isActive, q }
+  getItemsCount: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/items/count?${queryString}` : '/items/count';
+    return await apiRequest(endpoint);
+  },
+
+  // Get single item (full details with images and batches)
   getItem: async (itemId) => {
     return await apiRequest(`/items/${itemId}`);
   },
@@ -309,9 +360,9 @@ export const itemsAPI = {
     });
   },
 
-  // Update item (using category controller for embedded items)
+  // Update item (now uses direct items endpoint)
   updateItem: async (itemId, itemData) => {
-    return await apiRequest(`/categories/items/${itemId}`, {
+    return await apiRequest(`/items/${itemId}`, {
       method: 'PUT',
       body: JSON.stringify(itemData),
     });
@@ -336,9 +387,12 @@ export const itemsAPI = {
     return await apiRequest('/items/low-stock');
   },
 
-  // Get items by subcategory
-  getItemsBySubcategory: async (subcategoryId) => {
-    return await apiRequest(`/items/subcategory/${subcategoryId}`);
+  // Get items by subcategory (using cursor pagination)
+  getItemsBySubcategory: async (subcategoryId, params = {}) => {
+    const queryParams = { ...params, subcategoryId };
+    const queryString = new URLSearchParams(queryParams).toString();
+    const endpoint = `/items?${queryString}`;
+    return await apiRequest(endpoint);
   },
 
   // Get stock with batches
@@ -455,7 +509,13 @@ export const suppliersAPI = {
   getStores: async (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
     const endpoint = queryString ? `/suppliers/stores?${queryString}` : '/suppliers/stores';
-    return await apiRequest(endpoint);
+    const response = await apiRequest(endpoint);
+    return (
+      response?.data?.stores ||
+      response?.stores ||
+      response?.data ||
+      []
+    );
   },
 
   // Create store
