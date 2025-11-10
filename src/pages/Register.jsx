@@ -1,14 +1,14 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { 
-  ShoppingCart, 
-  Lock, 
-  Mail, 
-  User, 
-  Phone, 
-  Building, 
-  ArrowRight, 
+import {
+  ShoppingCart,
+  Lock,
+  Mail,
+  User,
+  Phone,
+  Building,
+  ArrowRight,
   Loader2,
   Eye,
   EyeOff,
@@ -22,12 +22,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { referenceDataAPI } from "@/services/api";
 
 export default function Register() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { register, isLoading, error, clearError } = useAuth();
-  
+
   // Form state
   const [formData, setFormData] = useState({
     firstName: "",
@@ -43,11 +44,16 @@ export default function Register() {
     state: "",
     zipCode: ""
   });
-  
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [formErrors, setFormErrors] = useState({});
+  const [roleOptions, setRoleOptions] = useState([]);
+  const [departmentOptions, setDepartmentOptions] = useState([]);
+  const [referenceLoading, setReferenceLoading] = useState(true);
+  const [referenceError, setReferenceError] = useState(null);
+  const hasFetchedRef = useRef(false);
 
   // Handle input changes
   const handleInputChange = (field, value) => {
@@ -58,48 +64,140 @@ export default function Register() {
     }
   };
 
+  const filteredRoleOptions = useMemo(
+    () => roleOptions.filter((role) => role.isActive),
+    [roleOptions]
+  );
+
+  const filteredDepartmentOptions = useMemo(
+    () => departmentOptions.filter((department) => department.isActive),
+    [departmentOptions]
+  );
+
+  useEffect(() => {
+    if (hasFetchedRef.current) {
+      return;
+    }
+
+    hasFetchedRef.current = true;
+
+    let isMounted = true;
+
+    const loadReferenceData = async () => {
+      try {
+        setReferenceLoading(true);
+        setReferenceError(null);
+
+        const [rolesDataRaw, departmentsDataRaw] = await Promise.all([
+          referenceDataAPI.getRoles(),
+          referenceDataAPI.getDepartments()
+        ]);
+
+        if (!isMounted) return;
+
+        const roleSlugMap = {
+          Administrator: "admin",
+          Manager: "manager",
+          Employee: "employee",
+          Cashier: "cashier"
+        };
+
+        const departmentSlugMap = {
+          Management: "management",
+          Sales: "sales",
+          Inventory: "inventory",
+          Billing: "billing",
+          Reports: "reports"
+        };
+
+        const normalizedRoles = (rolesDataRaw || []).map((role) => ({
+          ...role,
+          value: roleSlugMap[role.name] || role.name?.toLowerCase()?.replace(/\s+/g, "_") || ""
+        }));
+
+        const normalizedDepartments = (departmentsDataRaw || []).map((department) => ({
+          ...department,
+          value:
+            departmentSlugMap[department.name] ||
+            department.name?.toLowerCase()?.replace(/\s+/g, "_") ||
+            ""
+        }));
+
+        setRoleOptions(normalizedRoles);
+        setDepartmentOptions(normalizedDepartments);
+
+        setFormData((prev) => ({
+          ...prev,
+          role: prev.role || normalizedRoles[0]?.value || "",
+          department: prev.department || normalizedDepartments[0]?.value || ""
+        }));
+      } catch (error) {
+        if (!isMounted) return;
+        console.error("Failed to load roles or departments:", error);
+        setReferenceError("Unable to load roles or departments. Please try again.");
+        toast({
+          title: "Reference Data Error",
+          description: "Unable to load roles or departments. Please try again.",
+          variant: "destructive"
+        });
+      } finally {
+        if (isMounted) {
+          setReferenceLoading(false);
+        }
+      }
+    };
+
+    loadReferenceData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [toast]);
+
   // Validate form
   const validateForm = () => {
     const errors = {};
-    
+
     if (!formData.firstName.trim()) {
       errors.firstName = "First name is required";
     }
-    
-    if (!formData.lastName.trim()) {
-      errors.lastName = "Last name is required";
-    }
-    
+
     if (!formData.email.trim()) {
       errors.email = "Email is required";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       errors.email = "Please enter a valid email address";
     }
-    
+
     if (!formData.password) {
       errors.password = "Password is required";
     } else if (formData.password.length < 6) {
       errors.password = "Password must be at least 6 characters";
     }
-    
+
     if (!formData.confirmPassword) {
       errors.confirmPassword = "Please confirm your password";
     } else if (formData.password !== formData.confirmPassword) {
       errors.confirmPassword = "Passwords do not match";
     }
-    
+
     if (!formData.role) {
       errors.role = "Please select a role";
+    } else if (!filteredRoleOptions.some((role) => role.value === formData.role)) {
+      errors.role = "Please select a valid role";
     }
-    
+
     if (!formData.department) {
       errors.department = "Please select a department";
+    } else if (
+      !filteredDepartmentOptions.some((department) => department.value === formData.department)
+    ) {
+      errors.department = "Please select a valid department";
     }
-    
+
     if (!agreeToTerms) {
       errors.terms = "You must agree to the terms and conditions";
     }
-    
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -107,7 +205,7 @@ export default function Register() {
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       toast({
         title: "Validation Error",
@@ -121,12 +219,14 @@ export default function Register() {
 
     const registrationData = {
       firstName: formData.firstName.trim(),
-      lastName: formData.lastName.trim(),
+      lastName: formData.lastName.trim() || undefined,
       email: formData.email.trim().toLowerCase(),
       password: formData.password,
+      confirmPassword: formData.confirmPassword,
       role: formData.role,
       department: formData.department,
       phone: formData.phone.trim() || undefined,
+      agreeToTerms,
       address: {
         street: formData.street.trim() || undefined,
         city: formData.city.trim() || undefined,
@@ -136,13 +236,13 @@ export default function Register() {
     };
 
     const result = await register(registrationData);
-    
+
     if (result.success) {
       toast({
         title: "Registration Successful",
         description: `Account created successfully! Please login to continue.`,
       });
-      
+
       // Navigate to login page after successful registration
       navigate("/");
     } else {
@@ -261,7 +361,7 @@ export default function Register() {
               {/* Personal Information */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-primary">Personal Information</h3>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="firstName">First Name *</Label>
@@ -281,7 +381,7 @@ export default function Register() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="lastName">Last Name *</Label>
+                    <Label htmlFor="lastName">Last Name</Label>
                     <div className="relative">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
@@ -335,7 +435,7 @@ export default function Register() {
               {/* Security */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-primary">Security</h3>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="password">Password *</Label>
                   <div className="relative">
@@ -402,19 +502,30 @@ export default function Register() {
               {/* Role & Department */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-primary">Work Information</h3>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="role">Role *</Label>
-                    <Select value={formData.role} onValueChange={(value) => handleInputChange('role', value)}>
-                      <SelectTrigger className={formErrors.role ? 'border-destructive' : ''}>
-                        <SelectValue placeholder="Select role" />
+                    <Select
+                      value={formData.role}
+                      onValueChange={(value) => handleInputChange("role", value)}
+                      disabled={referenceLoading || !!referenceError}
+                    >
+                      <SelectTrigger className={formErrors.role ? "border-destructive" : ""}>
+                        <SelectValue placeholder={referenceLoading ? "Loading roles..." : "Select role"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="employee">Employee</SelectItem>
-                        <SelectItem value="cashier">Cashier</SelectItem>
-                        <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
+                        {filteredRoleOptions.length === 0 ? (
+                          <SelectItem value="__empty" disabled>
+                            {referenceError ? "Unable to load roles" : "No roles available"}
+                          </SelectItem>
+                        ) : (
+                          filteredRoleOptions.map((role) => (
+                            <SelectItem key={role.id} value={role.value}>
+                              {role.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                     {formErrors.role && (
@@ -424,16 +535,28 @@ export default function Register() {
 
                   <div className="space-y-2">
                     <Label htmlFor="department">Department *</Label>
-                    <Select value={formData.department} onValueChange={(value) => handleInputChange('department', value)}>
-                      <SelectTrigger className={formErrors.department ? 'border-destructive' : ''}>
-                        <SelectValue placeholder="Select department" />
+                    <Select
+                      value={formData.department}
+                      onValueChange={(value) => handleInputChange("department", value)}
+                      disabled={referenceLoading || !!referenceError}
+                    >
+                      <SelectTrigger className={formErrors.department ? "border-destructive" : ""}>
+                        <SelectValue
+                          placeholder={referenceLoading ? "Loading departments..." : "Select department"}
+                        />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="sales">Sales</SelectItem>
-                        <SelectItem value="inventory">Inventory</SelectItem>
-                        <SelectItem value="billing">Billing</SelectItem>
-                        <SelectItem value="reports">Reports</SelectItem>
-                        <SelectItem value="management">Management</SelectItem>
+                        {filteredDepartmentOptions.length === 0 ? (
+                          <SelectItem value="__empty" disabled>
+                            {referenceError ? "Unable to load departments" : "No departments available"}
+                          </SelectItem>
+                        ) : (
+                          filteredDepartmentOptions.map((department) => (
+                            <SelectItem key={department.id} value={department.value}>
+                              {department.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                     {formErrors.department && (
@@ -446,7 +569,7 @@ export default function Register() {
               {/* Address (Optional) */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-primary">Address (Optional)</h3>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="street">Street Address</Label>
                   <div className="relative">

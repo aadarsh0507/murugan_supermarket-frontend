@@ -11,7 +11,7 @@ const initialState = {
 };
 
 // Action types
-const   AUTH_ACTIONS = {
+const AUTH_ACTIONS = {
   LOGIN_START: 'LOGIN_START',
   LOGIN_SUCCESS: 'LOGIN_SUCCESS',
   LOGIN_FAILURE: 'LOGIN_FAILURE',
@@ -120,7 +120,6 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const loadUser = async () => {
       const token = getAuthToken();
-      
       if (!token) {
         dispatch({ type: AUTH_ACTIONS.LOAD_USER_FAILURE });
         return;
@@ -129,17 +128,19 @@ export const AuthProvider = ({ children }) => {
       try {
         dispatch({ type: AUTH_ACTIONS.LOAD_USER_START });
         const response = await authAPI.getProfile();
-        
+
         dispatch({
           type: AUTH_ACTIONS.LOAD_USER_SUCCESS,
           payload: { user: response.data.user },
         });
       } catch (error) {
-        console.error('Failed to load user:', error);
+        if (error.status !== 401) {
+          console.error('Failed to load user:', error);
+        }
         removeAuthToken();
         dispatch({
           type: AUTH_ACTIONS.LOAD_USER_FAILURE,
-          payload: error.message,
+          payload: error.status === 401 ? null : error.message,
         });
       }
     };
@@ -151,9 +152,8 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password, rememberMe = false) => {
     try {
       dispatch({ type: AUTH_ACTIONS.LOGIN_START });
-      
+
       const response = await authAPI.login(email, password, rememberMe);
-      
       dispatch({
         type: AUTH_ACTIONS.LOGIN_SUCCESS,
         payload: {
@@ -176,9 +176,8 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       dispatch({ type: AUTH_ACTIONS.REGISTER_START });
-      
+
       const response = await authAPI.register(userData);
-      
       dispatch({
         type: AUTH_ACTIONS.REGISTER_SUCCESS,
         payload: {
@@ -212,7 +211,7 @@ export const AuthProvider = ({ children }) => {
   const updateProfile = async (profileData) => {
     try {
       const response = await authAPI.updateProfile(profileData);
-      
+
       dispatch({
         type: AUTH_ACTIONS.UPDATE_USER,
         payload: response.data.user,
@@ -270,7 +269,7 @@ export const AuthProvider = ({ children }) => {
     isLoading: state.isLoading,
     error: state.error,
     selectedStore: state.user?.selectedStore || null,
-    
+
     // Actions
     login,
     register,
@@ -279,7 +278,7 @@ export const AuthProvider = ({ children }) => {
     changePassword,
     updateSelectedStore,
     clearError,
-    
+
     // Utility functions
     hasRole,
     hasAnyRole,
@@ -296,11 +295,11 @@ export const AuthProvider = ({ children }) => {
 // Custom hook to use auth context
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  
+
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
-  
+
   return context;
 };
 
